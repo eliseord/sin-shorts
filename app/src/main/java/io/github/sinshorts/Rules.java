@@ -40,19 +40,34 @@ public final class Rules {
 
     public static final int ID = 0, ID_SEL = 1, TEXT = 2, TEXT_SEL = 3, URL = 4, APP = 5;
 
-    /** Una categoría que el usuario puede activar o desactivar. */
+    /** A category the user can switch on or off. Texts in English and Spanish. */
     public static final class Category {
-        public final String key, title, subtitle;
+        public final String key;
         public final boolean defaultOn;
         public final String[] rules;
+        private final String titleEn, subtitleEn, titleEs, subtitleEs;
 
-        Category(String key, String title, String subtitle, boolean defaultOn, String... rules) {
+        Category(String key, String[] text, boolean defaultOn, String... rules) {
             this.key = key;
-            this.title = title;
-            this.subtitle = subtitle;
+            this.titleEn = text[0];
+            this.subtitleEn = text[1];
+            this.titleEs = text[2];
+            this.subtitleEs = text[3];
             this.defaultOn = defaultOn;
             this.rules = rules;
         }
+
+        public String title() {
+            return L.t(titleEn, titleEs);
+        }
+
+        public String subtitle() {
+            return L.t(subtitleEn, subtitleEs);
+        }
+    }
+
+    private static String[] tx(String titleEn, String subtitleEn, String titleEs, String subtitleEs) {
+        return new String[]{titleEn, subtitleEn, titleEs, subtitleEs};
     }
 
     private static final String YT = "com.google.android.youtube";
@@ -61,56 +76,86 @@ public final class Rules {
             "com.android.chrome,com.chrome.beta,org.mozilla.firefox,com.brave.browser,com.microsoft.emmx,com.duckduckgo.mobile.android";
 
     public static final Category[] CATEGORIES = {
-            new Category("cat_youtube", "YouTube Shorts",
-                    "Pestaña Shorts y Shorts abiertos desde el inicio o la búsqueda. Los vídeos normales siguen funcionando.",
+            new Category("cat_youtube", tx(
+                    "YouTube Shorts",
+                    "The Shorts tab and Shorts opened from home or search. Regular videos keep working.",
+                    "YouTube Shorts",
+                    "Pestaña Shorts y Shorts abiertos desde el inicio o la búsqueda. Los vídeos normales siguen funcionando."),
                     true,
                     YT + " | id:reel_recycler",
                     YT + " | id:reel_watch_player",
                     YT + " | id:reel_progress_bar",
                     YT + " | id:reel_watch_fragment_root",
                     YT + " | id:shorts_player"),
-            new Category("cat_instagram", "Instagram Reels",
-                    "Pestaña Reels y el visor de Reels. Feed, historias y mensajes siguen funcionando.",
+            new Category("cat_instagram", tx(
+                    "Instagram Reels",
+                    "The Reels tab and the Reels viewer. Feed, stories and messages keep working.",
+                    "Instagram Reels",
+                    "Pestaña Reels y el visor de Reels. Feed, historias y mensajes siguen funcionando."),
                     true,
                     IG + " | idsel:clips_tab",
                     IG + " | id:clips_viewer_view_pager",
                     IG + " | id:clips_viewer"),
-            new Category(Rules.KEY_IG_FOLLOWING, "Instagram: solo publicaciones de seguidos",
-                    "Tapa el feed de inicio, que mezcla sugerencias sin fin, y te lleva a «Siguiendo». Historias y mensajes siguen arriba.",
+            new Category(Rules.KEY_IG_FOLLOWING, tx(
+                    "Instagram: posts from people you follow only",
+                    "Covers the home feed, which mixes in endless suggestions, and takes you to “Following”. Stories and messages stay at the top.",
+                    "Instagram: solo publicaciones de seguidos",
+                    "Tapa el feed de inicio, que mezcla sugerencias sin fin, y te lleva a «Siguiendo». Historias y mensajes siguen arriba."),
                     true),
-            new Category(Rules.KEY_IG_EXPLORE, "Instagram: tapar Explorar",
-                    "Tapa la cuadrícula de Explorar. Buscar personas sigue funcionando.",
+            new Category(Rules.KEY_IG_EXPLORE, tx(
+                    "Instagram: cover Explore",
+                    "Covers the Explore grid. Searching for people keeps working.",
+                    "Instagram: tapar Explorar",
+                    "Tapa la cuadrícula de Explorar. Buscar personas sigue funcionando."),
                     true),
-            new Category("cat_facebook", "Facebook Reels (experimental)",
-                    "Pestaña Reels de Facebook. Si deja de funcionar, usa el modo diagnóstico.",
+            new Category("cat_facebook", tx(
+                    "Facebook Reels (experimental)",
+                    "Facebook’s Reels tab. If it stops working, use diagnostic mode.",
+                    "Facebook Reels (experimental)",
+                    "Pestaña Reels de Facebook. Si deja de funcionar, usa el modo diagnóstico."),
                     true,
                     "com.facebook.katana | textsel:reels"),
-            new Category("cat_snapchat", "Snapchat Spotlight (experimental)",
-                    "Pestaña Spotlight. Chats, cámara e historias siguen funcionando.",
+            new Category("cat_snapchat", tx(
+                    "Snapchat Spotlight (experimental)",
+                    "The Spotlight tab. Chats, camera and stories keep working.",
+                    "Snapchat Spotlight (experimental)",
+                    "Pestaña Spotlight. Chats, cámara e historias siguen funcionando."),
                     true,
                     "com.snapchat.android | textsel:spotlight",
                     "com.snapchat.android | idsel:spotlight"),
-            new Category("cat_browser", "Shorts y Reels en el navegador",
-                    "youtube.com/shorts, Reels de Instagram y TikTok en Chrome, Firefox, Brave, Edge y DuckDuckGo.",
+            new Category("cat_browser", tx(
+                    "Shorts and Reels in the browser",
+                    "youtube.com/shorts, Instagram Reels and TikTok in Chrome, Firefox, Brave, Edge and DuckDuckGo.",
+                    "Shorts y Reels en el navegador",
+                    "youtube.com/shorts, Reels de Instagram y TikTok en Chrome, Firefox, Brave, Edge y DuckDuckGo."),
                     true,
                     BROWSERS + " | url:youtube.com/shorts",
                     BROWSERS + " | url:instagram.com/reels",
                     BROWSERS + " | url:instagram.com/reel/",
                     BROWSERS + " | url:facebook.com/reel",
                     BROWSERS + " | url:tiktok.com"),
-            new Category("cat_tiktok", "TikTok completo",
-                    "TikTok es todo vídeo corto, así que se bloquea la app entera.",
+            new Category("cat_tiktok", tx(
+                    "TikTok (whole app)",
+                    "TikTok is all short video, so the whole app is blocked.",
+                    "TikTok completo",
+                    "TikTok es todo vídeo corto, así que se bloquea la app entera."),
                     false,
                     "com.zhiliaoapp.musically | app",
                     "com.ss.android.ugc.trill | app",
                     "com.zhiliaoapp.musically.go | app"),
     };
 
-    public static final String CUSTOM_HELP =
-            "# Una regla por línea:  paquete | tipo:valor\n"
-                    + "# Tipos: id, idsel, text, textsel, url, app\n"
-                    + "# Ejemplo:\n"
-                    + "# com.google.android.youtube | id:reel_recycler\n";
+    /** Comment block shown in an empty custom-rules box. Lines starting with # are ignored. */
+    public static String customHelp() {
+        return L.t("# One rule per line:  package | type:value\n"
+                        + "# Types: id, idsel, text, textsel, url, app\n"
+                        + "# Example:\n"
+                        + "# com.google.android.youtube | id:reel_recycler\n",
+                "# Una regla por línea:  paquete | tipo:valor\n"
+                        + "# Tipos: id, idsel, text, textsel, url, app\n"
+                        + "# Ejemplo:\n"
+                        + "# com.google.android.youtube | id:reel_recycler\n");
+    }
 
     /** Una regla ya interpretada. */
     public static final class Rule {

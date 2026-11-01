@@ -1,87 +1,96 @@
 # Sin Shorts
 
-App Android de código abierto que bloquea los vídeos cortos sin bloquear las apps:
+*English · [Español](README.es.md)*
 
-| App | Qué se bloquea | Qué sigue funcionando |
+Open-source Android app that blocks short-form video **without blocking the apps that contain it**:
+
+| App | What gets blocked | What keeps working |
 |---|---|---|
-| YouTube | Pestaña Shorts y cualquier Short que abras | Vídeos normales, suscripciones, búsqueda |
-| Instagram | Pestaña Reels y el visor de Reels | Feed, historias, mensajes, perfiles |
-| Instagram: solo seguidos | Tapa el feed de inicio (sugerencias sin fin) con un botón que abre el feed «Siguiendo» | Feed «Siguiendo», historias, mensajes |
-| Instagram: Explorar | Tapa la cuadrícula de Explorar | Buscar personas |
-| Facebook *(experimental)* | Pestaña Reels | Todo lo demás |
-| Snapchat *(experimental)* | Spotlight | Chats, cámara, historias |
-| Navegadores | youtube.com/shorts, Reels y TikTok web | El resto de la web |
-| TikTok *(desactivado por defecto)* | La app entera | — |
+| YouTube | The Shorts tab and any Short you open | Regular videos, subscriptions, search |
+| Instagram | The Reels tab and the Reels viewer | Feed, stories, messages, profiles |
+| Instagram: following only | Covers the home feed (endless suggestions) with a button that opens the “Following” feed | “Following” feed, stories, messages |
+| Instagram: Explore | Covers the Explore grid | Searching for people |
+| Facebook *(experimental)* | The Reels tab | Everything else |
+| Snapchat *(experimental)* | Spotlight | Chats, camera, stories |
+| Browsers | youtube.com/shorts, Reels and TikTok on the web | The rest of the web |
+| TikTok *(off by default)* | The whole app | — |
 
-Cuando entras en una de esas secciones, la app pulsa «Atrás» por ti. Si la app insiste, te manda a la pantalla de inicio.
+When you enter one of those sections, the app presses Back for you. If the app insists, it sends you to the home screen.
 
-**Privacidad:** no pide permiso de Internet, así que no puede enviar nada fuera del teléfono. Solo lee la estructura de la pantalla de las apps de la lista para reconocer esas secciones.
+**Privacy:** the app does not request the Internet permission, so it cannot send anything off the phone. It only reads the screen structure of the listed apps to recognise those sections.
 
-## Instalar
+The app is in English by default and can be switched to Spanish in the setup guide or in **Options → Language**.
 
-1. Play Protect bloquea las apps de accesibilidad descargadas desde el navegador o un gestor de archivos. Para instalarla: Play Store → tu foto → Play Protect → ⚙️ → desactiva «Analizar apps con Play Protect», instala `SinShorts.apk` y **vuelve a activarlo**. Otra opción es `adb install SinShorts.apk` desde un ordenador.
-2. Abre **Sin Shorts**. La primera vez se abre una **guía paso a paso** que:
-   - te lleva directo al interruptor de accesibilidad y detecta cuándo lo has activado;
-   - si Android muestra «Se ha denegado el acceso a la aplicación» o «Ajuste restringido», te explica cómo desbloquearlo y te abre la pantalla correcta;
-   - te pide (opcional) que Android no la detenga para ahorrar batería;
-   - te deja elegir qué bloquear;
-   - abre un Short de prueba y comprueba que te saca de él.
+📐 Technical dossier (architecture, timing, rule engine, iteration log): [`docs/`](docs/)
 
-Puedes repetir la guía desde **Opciones → Repetir la configuración guiada**. Si el servicio se desactiva, la pantalla principal te lo avisa con un botón para arreglarlo.
+## Install
 
-## Si una app se actualiza y deja de bloquearse
+1. Play Protect blocks accessibility apps downloaded from a browser or file manager. To install it: Play Store → your profile picture → Play Protect → ⚙️ → turn off “Scan apps with Play Protect”, install `SinShorts.apk`, and **turn it back on**. Alternatively, run `adb install SinShorts.apk` from a computer.
+2. Open **Sin Shorts**. On first launch a **step-by-step guide**:
+   - takes you straight to the accessibility switch and detects when you’ve turned it on;
+   - if Android shows “App was denied access” or “Restricted setting”, explains how to unlock it and opens the right screen;
+   - optionally asks Android not to stop it to save battery;
+   - lets you choose what to block;
+   - opens a test Short and checks that it takes you out.
 
-YouTube, Instagram, etc. cambian a veces sus IDs internos. Para arreglarlo sin tocar código:
+You can repeat the guide from **Options → Repeat the setup guide**. If the service gets turned off, the main screen tells you and offers a button to fix it.
 
-1. En la app, activa **Modo diagnóstico**.
-2. Abre la sección que quieres bloquear (por ejemplo, la pestaña Reels) y vuelve a Sin Shorts.
-3. Busca el ID nuevo (lo marcado como «Seleccionado» suele ser la pestaña activa) y añade una regla en **Reglas personalizadas**.
+## If an app updates and stops being blocked
 
-Formato de regla, una por línea:
+YouTube, Instagram and others sometimes change their internal IDs. To fix it without touching code:
+
+1. In the app, turn on **Diagnostic mode**.
+2. Open the section you want to block (for example, the Reels tab) and go back to Sin Shorts.
+3. Find the new ID (whatever is marked “Selected” is usually the active tab) and add a rule under **Custom rules**.
+
+Rule format, one per line:
 
 ```
-paquete[,paquete2] | tipo:valor
+package[,package2] | type:value
 ```
 
-| Tipo | Significado |
+| Type | Meaning |
 |---|---|
-| `id:NOMBRE` | hay una vista visible con ese ID |
-| `idsel:NOMBRE` | esa vista está seleccionada (pestaña activa) |
-| `text:TEXTO` | una vista visible contiene ese texto o descripción |
-| `textsel:TEXTO` | igual, pero seleccionada |
-| `url:TEXTO` | la barra de direcciones del navegador contiene TEXTO |
-| `app` | bloquea la app entera |
+| `id:NAME` | a visible view has that ID |
+| `idsel:NAME` | that view is selected (active tab) |
+| `text:TEXT` | a visible view’s text or description contains TEXT |
+| `textsel:TEXT` | same, but selected |
+| `url:TEXT` | the browser address bar contains TEXT |
+| `app` | blocks the whole app |
 
-Ejemplo: `com.google.android.youtube | id:reel_recycler`
+Example: `com.google.android.youtube | id:reel_recycler`
 
-Las reglas incluidas están en `app/src/main/java/io/github/sinshorts/Rules.java`.
+The built-in rules live in `app/src/main/java/io/github/sinshorts/Rules.java`.
 
-## Compilar
+## Build
 
-**Opción A — sin Android Studio (Linux, probado):**
+**Option A — without Android Studio (Linux, tested):**
 
 ```bash
 sudo apt install openjdk-17-jdk aapt apksigner dalvik-exchange zipalign curl
 ./build.sh            # → build/SinShorts.apk
 ```
 
-La primera vez crea una clave de firma `sinshorts.keystore`. Guárdala: para instalar una versión nueva encima de la anterior hay que firmarla con la misma clave.
+The first run creates a signing key, `sinshorts.keystore`. Keep it: installing a new version over an old one requires the same key.
 
-**Opción B — GitHub:** sube el proyecto a un repositorio; el flujo `.github/workflows/build.yml` compila el APK en cada cambio y lo deja en la pestaña *Actions*.
+**Option B — GitHub:** the `.github/workflows/build.yml` workflow builds the APK on every push and attaches it in the *Actions* tab.
 
-**Opción C — Android Studio:** abre la carpeta del proyecto (incluye `build.gradle`).
+**Option C — Android Studio:** open the project folder (it includes `build.gradle`).
 
-## Estructura
+## Structure
 
 ```
 app/src/main/
   AndroidManifest.xml
   java/io/github/sinshorts/
-    BlockerService.java   servicio de accesibilidad: detecta y sale
-    Rules.java            reglas incluidas y formato de reglas
-    MainActivity.java     pantalla de ajustes
-    Diagnostics.java      capturas del modo diagnóstico
+    BlockerService.java      accessibility service: detects and exits
+    Rules.java               built-in rules and rule format
+    Curtain.java             overlay over Instagram's feed
+    MainActivity.java        settings screen
+    OnboardingActivity.java  setup guide
+    L.java                   app language (English / Spanish)
+    Diagnostics.java         diagnostic-mode captures
   res/xml/accessibility_service.xml
 ```
 
-Licencia MIT.
+MIT licence.

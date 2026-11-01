@@ -49,6 +49,7 @@ public class OnboardingActivity extends Activity {
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
+        L.init(this);
         ui = new Ui(this);
         prefs = getSharedPreferences(Rules.PREFS, MODE_PRIVATE);
         if (state != null) {
@@ -85,7 +86,7 @@ public class OnboardingActivity extends Activity {
         LinearLayout bar = new LinearLayout(this);
         bar.setGravity(Gravity.CENTER_VERTICAL);
         bar.setPadding(ui.dp(14), ui.dp(8), ui.dp(18), ui.dp(14));
-        back = ui.button("Atrás");
+        back = ui.button(L.t("Back", "Atrás"));
         back.setTextColor(ui.fgMuted);
         back.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -96,7 +97,7 @@ public class OnboardingActivity extends Activity {
         bar.addView(back);
         // Separador horizontal: altura fija de 1 px (con wrap_content se comía toda la pantalla)
         bar.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1f));
-        next = ui.primary("Siguiente");
+        next = ui.primary(L.t("Next", "Siguiente"));
         next.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -179,6 +180,7 @@ public class OnboardingActivity extends Activity {
     private void render() {
         content.removeAllViews();
         renderDots();
+        back.setText(L.t("Back", "Atrás"));
         back.setVisibility(step == WELCOME ? View.INVISIBLE : View.VISIBLE);
         next.setEnabled(true);
         next.setAlpha(1f);
@@ -203,7 +205,7 @@ public class OnboardingActivity extends Activity {
             lp.rightMargin = ui.dp(6);
             dots.addView(d, lp);
         }
-        stepLabel.setText(step == WELCOME || step == DONE ? "" : "Paso " + step + " de " + (STEPS - 2));
+        stepLabel.setText(step == WELCOME || step == DONE ? "" : L.t("Step " + step + " of " + (STEPS - 2), "Paso " + step + " de " + (STEPS - 2)));
     }
 
     private void title(String t) {
@@ -275,33 +277,40 @@ public class OnboardingActivity extends Activity {
     // ------------------------------------------------------------------ pasos
 
     private void renderWelcome() {
-        title("Vamos a ponerla en marcha");
-        body("Sin Shorts te saca automáticamente de Shorts, Reels y Spotlight, y te deja usar todo lo demás de cada app. "
-                + "Te guío por los ajustes que hacen falta. Son unos 2 minutos.");
-        numbered("Lo que vamos a hacer",
-                "Activar la protección en los ajustes de Android",
-                "Evitar que Android la detenga para ahorrar batería",
-                "Elegir qué quieres bloquear",
-                "Probar que funciona");
+        languagePicker();
+        title(L.t("Let’s get it running", "Vamos a ponerla en marcha"));
+        body(L.t("Sin Shorts automatically takes you out of Shorts, Reels and Spotlight, and lets you use everything else in each app. "
+                        + "I’ll guide you through the settings it needs. It takes about 2 minutes.",
+                "Sin Shorts te saca automáticamente de Shorts, Reels y Spotlight, y te deja usar todo lo demás de cada app. "
+                        + "Te guío por los ajustes que hacen falta. Son unos 2 minutos."));
+        numbered(L.t("What we’ll do", "Lo que vamos a hacer"),
+                L.t("Turn on protection in Android settings", "Activar la protección en los ajustes de Android"),
+                L.t("Stop Android from pausing it to save battery", "Evitar que Android la detenga para ahorrar batería"),
+                L.t("Choose what to block", "Elegir qué quieres bloquear"),
+                L.t("Test that it works", "Probar que funciona"));
         LinearLayout c = ui.card(content);
-        c.addView(ui.text("Tu privacidad", 16, ui.fg, true));
-        TextView p = ui.text("La app no tiene permiso de Internet: no puede enviar nada fuera de tu teléfono. "
-                + "Solo mira qué sección tienes abierta en las apps de la lista, nunca guarda lo que ves.", 14, ui.fgMuted, false);
+        c.addView(ui.text(L.t("Your privacy", "Tu privacidad"), 16, ui.fg, true));
+        TextView p = ui.text(L.t("The app has no Internet permission: it cannot send anything off your phone. "
+                        + "It only checks which section you have open in the listed apps, and never stores what you see.",
+                "La app no tiene permiso de Internet: no puede enviar nada fuera de tu teléfono. "
+                        + "Solo mira qué sección tienes abierta en las apps de la lista, nunca guarda lo que ves."), 14, ui.fgMuted, false);
         p.setPadding(0, ui.dp(6), 0, 0);
         c.addView(p);
-        setNext("Empezar");
+        setNext(L.t("Start", "Empezar"));
     }
 
     private void renderActivate() {
-        title("Activa la protección");
+        title(L.t("Turn on protection", "Activa la protección"));
         boolean enabled = Setup.serviceEnabled(this);
         if (enabled) {
-            status(true, "Protección activada", "Sin Shorts ya puede reconocer los vídeos cortos.");
-            setNext("Siguiente");
+            status(true, L.t("Protection on", "Protección activada"),
+                    L.t("Sin Shorts can now recognise short videos.", "Sin Shorts ya puede reconocer los vídeos cortos."));
+            setNext(L.t("Next", "Siguiente"));
             return;
         }
 
-        body("Android exige activar Sin Shorts como servicio de accesibilidad. Así puede saber si estás en Shorts o Reels.");
+        body(L.t("Android requires Sin Shorts to be turned on as an accessibility service. That’s how it knows when you’re in Shorts or Reels.",
+                "Android exige activar Sin Shorts como servicio de accesibilidad. Así puede saber si estás en Shorts o Reels."));
 
         int restricted = Setup.restrictedState(this);
         boolean newAndroid = Build.VERSION.SDK_INT >= 33;
@@ -310,17 +319,23 @@ public class OnboardingActivity extends Activity {
         if (restricted == Setup.RESTRICTED) {
             sawRestricted = true;
             // Android bloquea el interruptor en apps instaladas fuera de Play Store
-            LinearLayout c = numbered("Primero, desbloquea el ajuste",
-                    "Pulsa «Probar el interruptor» y toca el interruptor de Sin Shorts. Saldrá el aviso «Se ha denegado el acceso a la aplicación» "
-                            + "(o «Ajuste restringido»): ciérralo y vuelve aquí con el botón Atrás.",
-                    "Pulsa «Abrir info de la app», toca el menú ⋮ arriba a la derecha y elige «Permitir ajustes restringidos». "
-                            + "Confirma con tu huella o PIN y vuelve aquí.",
-                    "Cuando vuelvas, esta pantalla cambiará y te dirá el último paso.");
-            TextView why = ui.text("Android hace esto con todas las apps que no vienen de Play Store. Es normal.", 13, ui.fgMuted, false);
+            LinearLayout c = numbered(L.t("First, unlock the setting", "Primero, desbloquea el ajuste"),
+                    L.t("Tap “Try the switch” and tap the Sin Shorts switch. You’ll see “App was denied access” "
+                                    + "(or “Restricted setting”): close it and come back here with the Back button.",
+                            "Pulsa «Probar el interruptor» y toca el interruptor de Sin Shorts. Saldrá el aviso «Se ha denegado el acceso a la aplicación» "
+                                    + "(o «Ajuste restringido»): ciérralo y vuelve aquí con el botón Atrás."),
+                    L.t("Tap “Open app info”, tap the ⋮ menu at the top right and choose “Allow restricted settings”. "
+                                    + "Confirm with your fingerprint or PIN and come back here.",
+                            "Pulsa «Abrir info de la app», toca el menú ⋮ arriba a la derecha y elige «Permitir ajustes restringidos». "
+                                    + "Confirma con tu huella o PIN y vuelve aquí."),
+                    L.t("When you return, this screen will change and show you the last step.",
+                            "Cuando vuelvas, esta pantalla cambiará y te dirá el último paso."));
+            TextView why = ui.text(L.t("Android does this with every app that doesn’t come from the Play Store. It’s normal.",
+                    "Android hace esto con todas las apps que no vienen de Play Store. Es normal."), 13, ui.fgMuted, false);
             why.setPadding(0, ui.dp(8), 0, 0);
             c.addView(why);
 
-            action(triedToggle ? "Abrir info de la app" : "Probar el interruptor", true, new View.OnClickListener() {
+            action(triedToggle ? L.t("Open app info", "Abrir info de la app") : L.t("Try the switch", "Probar el interruptor"), true, new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
                     if (triedToggle) {
@@ -331,7 +346,7 @@ public class OnboardingActivity extends Activity {
                     }
                 }
             });
-            action(triedToggle ? "Volver a probar el interruptor" : "Abrir info de la app", false, new View.OnClickListener() {
+            action(triedToggle ? L.t("Try the switch again", "Volver a probar el interruptor") : L.t("Open app info", "Abrir info de la app"), false, new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
                     if (triedToggle) Setup.openServiceToggle(OnboardingActivity.this);
@@ -339,12 +354,12 @@ public class OnboardingActivity extends Activity {
                 }
             });
         } else {
-            numbered(justUnlocked ? "Ajuste desbloqueado. Último paso:" : null,
-                    "Pulsa «Activar».",
-                    "Enciende el interruptor «Usar Sin Shorts».",
-                    "En el aviso que aparece, toca «Permitir».",
-                    "Vuelve aquí con el botón Atrás.");
-            action("Activar", true, new View.OnClickListener() {
+            numbered(justUnlocked ? L.t("Setting unlocked. Last step:", "Ajuste desbloqueado. Último paso:") : null,
+                    L.t("Tap “Turn on”.", "Pulsa «Activar»."),
+                    L.t("Turn on the “Use Sin Shorts” switch.", "Enciende el interruptor «Usar Sin Shorts»."),
+                    L.t("In the dialog that appears, tap “Allow”.", "En el aviso que aparece, toca «Permitir»."),
+                    L.t("Come back here with the Back button.", "Vuelve aquí con el botón Atrás."));
+            action(L.t("Turn on", "Activar"), true, new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
                     triedToggle = true;
@@ -355,10 +370,11 @@ public class OnboardingActivity extends Activity {
             if (newAndroid && !justUnlocked) {
                 // Android no siempre deja comprobarlo: ofrecer la solución por si acaso
                 final LinearLayout help = numbered(null,
-                        "Toca el interruptor y cierra el aviso que aparece.",
-                        "Pulsa «Abrir info de la app», toca ⋮ arriba a la derecha y elige «Permitir ajustes restringidos».",
-                        "Vuelve aquí y pulsa «Activar» otra vez.");
-                Button b = ui.button("Abrir info de la app");
+                        L.t("Tap the switch and close the dialog that appears.", "Toca el interruptor y cierra el aviso que aparece."),
+                        L.t("Tap “Open app info”, tap ⋮ at the top right and choose “Allow restricted settings”.",
+                                "Pulsa «Abrir info de la app», toca ⋮ arriba a la derecha y elige «Permitir ajustes restringidos»."),
+                        L.t("Come back here and tap “Turn on” again.", "Vuelve aquí y pulsa «Activar» otra vez."));
+                Button b = ui.button(L.t("Open app info", "Abrir info de la app"));
                 b.setOnClickListener(new View.OnClickListener() {
                     @Override
                     public void onClick(View v) {
@@ -367,7 +383,8 @@ public class OnboardingActivity extends Activity {
                 });
                 help.addView(b);
                 help.setVisibility(triedToggle ? View.VISIBLE : View.GONE);
-                final Button toggleHelp = ui.button("¿Sale «Se ha denegado el acceso» o «Ajuste restringido»?");
+                final Button toggleHelp = ui.button(L.t("Seeing “App was denied access” or “Restricted setting”?",
+                        "¿Sale «Se ha denegado el acceso» o «Ajuste restringido»?"));
                 toggleHelp.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
                 toggleHelp.setOnClickListener(new View.OnClickListener() {
                     @Override
@@ -380,38 +397,41 @@ public class OnboardingActivity extends Activity {
                 content.addView(help);
             }
         }
-        setNext("Lo haré después");
+        setNext(L.t("Do it later", "Lo haré después"));
     }
 
     private void renderBattery() {
-        title("Que no se detenga");
+        title(L.t("Keep it running", "Que no se detenga"));
         if (Setup.batteryUnrestricted(this)) {
-            status(true, "Listo", "Android no detendrá Sin Shorts para ahorrar batería.");
-            setNext("Siguiente");
+            status(true, L.t("Done", "Listo"), L.t("Android won’t stop Sin Shorts to save battery.",
+                    "Android no detendrá Sin Shorts para ahorrar batería."));
+            setNext(L.t("Next", "Siguiente"));
             return;
         }
-        body("Recomendado. Así Android no la detiene para ahorrar batería. Gasta muy poco: solo trabaja mientras usas las apps de la lista.");
+        body(L.t("Recommended, so Android doesn’t stop it to save battery. It uses very little: it only works while you use the listed apps.",
+                "Recomendado. Así Android no la detiene para ahorrar batería. Gasta muy poco: solo trabaja mientras usas las apps de la lista."));
         numbered(null,
-                "Pulsa «Permitir».",
-                "En el aviso «¿Permitir que la app se ejecute siempre en segundo plano?», toca «Permitir».");
-        action("Permitir", true, new View.OnClickListener() {
+                L.t("Tap “Allow”.", "Pulsa «Permitir»."),
+                L.t("In the “Let app always run in background?” dialog, tap “Allow”.",
+                        "En el aviso «¿Permitir que la app se ejecute siempre en segundo plano?», toca «Permitir»."));
+        action(L.t("Allow", "Permitir"), true, new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 Setup.requestBatteryUnrestricted(OnboardingActivity.this);
             }
         });
-        setNext("Omitir");
+        setNext(L.t("Skip", "Omitir"));
     }
 
     private void renderChoose() {
-        title("Elige qué bloquear");
-        body("Puedes cambiarlo cuando quieras desde la app.");
+        title(L.t("Choose what to block", "Elige qué bloquear"));
+        body(L.t("You can change this any time from the app.", "Puedes cambiarlo cuando quieras desde la app."));
         LinearLayout cats = ui.card(content);
         for (int i = 0; i < Rules.CATEGORIES.length; i++) {
             final Rules.Category c = Rules.CATEGORIES[i];
             if (i > 0) ui.divider(cats);
             Switch s = new Switch(this);
-            s.setText(c.title);
+            s.setText(c.title());
             s.setTextSize(16);
             s.setTextColor(ui.fg);
             s.setChecked(prefs.getBoolean(c.key, c.defaultOn));
@@ -422,57 +442,62 @@ public class OnboardingActivity extends Activity {
                 }
             });
             cats.addView(s, ui.fullWidth(0));
-            TextView sub = ui.text(c.subtitle, 13, ui.fgMuted, false);
+            TextView sub = ui.text(c.subtitle(), 13, ui.fgMuted, false);
             sub.setPadding(0, 0, ui.dp(56), 0);
             cats.addView(sub);
         }
-        setNext("Siguiente");
+        setNext(L.t("Next", "Siguiente"));
     }
 
     private void renderTest() {
-        title("Pruébalo");
+        title(L.t("Try it", "Pruébalo"));
         boolean enabled = Setup.serviceEnabled(this);
         boolean active = prefs.getBoolean(Rules.KEY_ENABLED, true);
 
         if (!enabled) {
-            status(false, "La protección no está activada",
-                    "Sin ella no se puede bloquear nada. Vuelve al paso 1 para activarla.");
-            action("Ir al paso 1", true, new View.OnClickListener() {
+            status(false, L.t("Protection is off", "La protección no está activada"),
+                    L.t("Nothing can be blocked without it. Go back to step 1 to turn it on.",
+                            "Sin ella no se puede bloquear nada. Vuelve al paso 1 para activarla."));
+            action(L.t("Go to step 1", "Ir al paso 1"), true, new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
                     go(ACTIVATE);
                 }
             });
-            setNext("Saltar la prueba");
+            setNext(L.t("Skip the test", "Saltar la prueba"));
             return;
         }
         if (!active) {
             prefs.edit().putBoolean(Rules.KEY_ENABLED, true).apply();
         }
 
-        body("Pulsa un botón: se abrirá un vídeo corto. Si todo va bien, Sin Shorts te sacará en un segundo y volverás aquí.");
+        body(L.t("Tap a button: a short video will open. If all goes well, Sin Shorts will take you out within a second and you’ll be back here.",
+                "Pulsa un botón: se abrirá un vídeo corto. Si todo va bien, Sin Shorts te sacará en un segundo y volverás aquí."));
 
         if (testPassed) {
-            status(true, "¡Funciona!", "Sin Shorts te sacó del vídeo corto. Ya está todo preparado.");
+            status(true, L.t("It works!", "¡Funciona!"), L.t("Sin Shorts took you out of the short video. You’re all set.",
+                    "Sin Shorts te sacó del vídeo corto. Ya está todo preparado."));
         } else if (totalBeforeTest >= 0) {
-            status(false, "No te sacó esta vez",
-                    "Prueba a entrar tú en la pestaña Shorts de YouTube y espera un segundo. "
-                            + "Si sigue sin funcionar, puede que la app haya cambiado: el modo diagnóstico te ayuda a arreglarlo.");
+            status(false, L.t("It didn’t take you out this time", "No te sacó esta vez"),
+                    L.t("Try opening the Shorts tab in YouTube yourself and wait a second. "
+                                    + "If it still doesn’t work, the app may have changed: diagnostic mode helps you fix it.",
+                            "Prueba a entrar tú en la pestaña Shorts de YouTube y espera un segundo. "
+                                    + "Si sigue sin funcionar, puede que la app haya cambiado: el modo diagnóstico te ayuda a arreglarlo."));
         }
 
-        action("Abrir YouTube Shorts", !testPassed, new View.OnClickListener() {
+        action(L.t("Open YouTube Shorts", "Abrir YouTube Shorts"), !testPassed, new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 startTest("https://www.youtube.com/shorts");
             }
         });
-        action("Abrir Instagram Reels", false, new View.OnClickListener() {
+        action(L.t("Open Instagram Reels", "Abrir Instagram Reels"), false, new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 startTest("https://www.instagram.com/reels/");
             }
         });
-        setNext(testPassed ? "Siguiente" : "Saltar la prueba");
+        setNext(testPassed ? L.t("Next", "Siguiente") : L.t("Skip the test", "Saltar la prueba"));
     }
 
     private void startTest(String url) {
@@ -480,24 +505,26 @@ public class OnboardingActivity extends Activity {
         testRunning = true;
         if (!Setup.openLink(this, url)) {
             testRunning = false;
-            Toast.makeText(this, "No se pudo abrir el enlace", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, L.t("Couldn’t open the link", "No se pudo abrir el enlace"), Toast.LENGTH_SHORT).show();
         }
     }
 
     private void renderDone() {
         boolean enabled = Setup.serviceEnabled(this);
-        title(enabled ? "¡Todo listo!" : "Casi listo");
+        title(enabled ? L.t("All set!", "¡Todo listo!") : L.t("Almost there", "Casi listo"));
         body(enabled
-                ? "Sin Shorts ya está trabajando. No tienes que abrirla: funciona sola en segundo plano."
-                : "Falta activar la protección. Sin ella no se bloquea nada.");
+                ? L.t("Sin Shorts is already working. You don’t need to open it: it runs on its own in the background.",
+                        "Sin Shorts ya está trabajando. No tienes que abrirla: funciona sola en segundo plano.")
+                : L.t("Protection still needs to be turned on. Nothing is blocked without it.",
+                        "Falta activar la protección. Sin ella no se bloquea nada."));
 
         LinearLayout c = ui.card(content);
-        checkRow(c, enabled, "Protección activada");
-        checkRow(c, Setup.batteryUnrestricted(this), "Sin restricciones de batería (recomendado)");
-        checkRow(c, testPassed, "Prueba superada");
+        checkRow(c, enabled, L.t("Protection on", "Protección activada"));
+        checkRow(c, Setup.batteryUnrestricted(this), L.t("No battery restrictions (recommended)", "Sin restricciones de batería (recomendado)"));
+        checkRow(c, testPassed, L.t("Test passed", "Prueba superada"));
 
         if (!enabled) {
-            action("Activar ahora", true, new View.OnClickListener() {
+            action(L.t("Turn on now", "Activar ahora"), true, new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
                     go(ACTIVATE);
@@ -506,14 +533,49 @@ public class OnboardingActivity extends Activity {
         }
 
         LinearLayout tips = ui.card(content);
-        tips.addView(ui.text("Bueno saberlo", 16, ui.fg, true));
-        TextView t = ui.text("• Puedes pausar el bloqueo desde la app sin tocar los ajustes.\n"
-                + "• Si alguna app se actualiza y deja de bloquearse, usa el modo diagnóstico.\n"
-                + "• Puedes repetir esta guía cuando quieras desde la app.", 14, ui.fgMuted, false);
+        tips.addView(ui.text(L.t("Good to know", "Bueno saberlo"), 16, ui.fg, true));
+        TextView t = ui.text(L.t("• You can pause blocking from the app without touching settings.\n"
+                        + "• If an app updates and stops being blocked, use diagnostic mode.\n"
+                        + "• You can repeat this guide any time from the app.",
+                "• Puedes pausar el bloqueo desde la app sin tocar los ajustes.\n"
+                        + "• Si alguna app se actualiza y deja de bloquearse, usa el modo diagnóstico.\n"
+                        + "• Puedes repetir esta guía cuando quieras desde la app."), 14, ui.fgMuted, false);
         t.setPadding(0, ui.dp(6), 0, 0);
         tips.addView(t);
 
-        setNext("Ir a Sin Shorts");
+        setNext(L.t("Go to Sin Shorts", "Ir a Sin Shorts"));
+    }
+
+    /** English / Español, at the top of the first step. */
+    private void languagePicker() {
+        LinearLayout row = new LinearLayout(this);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.addView(ui.text("Language · Idioma", 13, ui.fgMuted, false), ui.weight());
+        row.addView(langButton("English", false));
+        row.addView(langButton("Español", true));
+        content.addView(row, ui.fullWidth(0));
+    }
+
+    private Button langButton(String label, final boolean spanish) {
+        boolean on = L.es() == spanish;
+        Button b = on ? ui.primary(label) : ui.button(label);
+        b.setTextSize(14);
+        b.setMinHeight(ui.dp(38));
+        b.setMinimumHeight(ui.dp(38));
+        b.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                if (L.es() == spanish) return;
+                L.set(OnboardingActivity.this, spanish);
+                next.setText(L.t("Next", "Siguiente"));
+                render();
+            }
+        });
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        lp.leftMargin = ui.dp(6);
+        b.setLayoutParams(lp);
+        return b;
     }
 
     private void checkRow(LinearLayout parent, boolean good, String label) {

@@ -143,16 +143,18 @@ final class Curtain {
 
         box.addView(label("SIN SHORTS", 12, accent, true));
         boolean home = m == HOME_FEED;
-        TextView title = label(home ? "Solo tus seguidos" : "Explorar está tapado", 22, fg, true);
+        TextView title = label(home ? L.t("Only people you follow", "Solo tus seguidos") : L.t("Explore is covered", "Explorar está tapado"), 22, fg, true);
         title.setPadding(0, dp(8), 0, dp(8));
         box.addView(title);
         box.addView(label(home
-                ? "El inicio mezcla publicaciones sugeridas sin fin. En «Siguiendo» ves solo a quien sigues, en orden, y se termina."
-                : "Aquí solo hay contenido de cuentas que no sigues. Puedes seguir buscando personas con la barra de arriba.",
+                ? L.t("Home mixes in endless suggested posts. “Following” shows only the people you follow, in order, and it ends.",
+                        "El inicio mezcla publicaciones sugeridas sin fin. En «Siguiendo» ves solo a quien sigues, en orden, y se termina.")
+                : L.t("This is only content from accounts you don’t follow. You can still search for people with the bar above.",
+                        "Aquí solo hay contenido de cuentas que no sigues. Puedes seguir buscando personas con la barra de arriba."),
                 15, muted, false));
 
         Button b = new Button(service, null, android.R.attr.borderlessButtonStyle);
-        b.setText(home ? "Abrir Siguiendo" : "Buscar");
+        b.setText(home ? L.t("Open Following", "Abrir Siguiendo") : L.t("Search", "Buscar"));
         b.setAllCaps(false);
         b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
         b.setTypeface(Typeface.DEFAULT_BOLD);
@@ -176,7 +178,8 @@ final class Curtain {
         box.addView(b, lp);
 
         if (home) {
-            TextView hint = label("También: toca el logo de Instagram arriba › Siguiendo. Historias y mensajes siguen arriba.",
+            TextView hint = label(L.t("Or tap the Instagram logo at the top › Following. Stories and messages are still up there.",
+                    "También: toca el logo de Instagram arriba › Siguiendo. Historias y mensajes siguen arriba."),
                     13, muted, false);
             hint.setPadding(0, dp(16), 0, 0);
             box.addView(hint);

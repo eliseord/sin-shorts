@@ -125,6 +125,7 @@ public class BlockerService extends AccessibilityService
     }
 
     private void reload() {
+        L.init(this);
         List<Rules.Rule> r = Rules.load(prefs);
         Set<String> pk = new HashSet<String>();
         for (Rules.Rule rule : r) pk.addAll(rule.packages);
@@ -312,7 +313,7 @@ public class BlockerService extends AccessibilityService
         countBlock();
         if (toast) {
             Toast.makeText(this, goHome && rule.type == Rules.APP
-                    ? "Sin Shorts: app bloqueada" : "Sin Shorts: vídeo corto bloqueado", Toast.LENGTH_SHORT).show();
+                    ? L.t("Sin Shorts: app blocked", "Sin Shorts: app bloqueada") : L.t("Sin Shorts: short video blocked", "Sin Shorts: vídeo corto bloqueado"), Toast.LENGTH_SHORT).show();
         }
         scheduleRecheck();
     }
@@ -532,13 +533,13 @@ public class BlockerService extends AccessibilityService
                 }, 700);
                 return;
             }
-            recordDebug("No se encontró la cabecera main_feed_action_bar.\n" + describe(root, 60));
+            recordDebug(L.t("Header main_feed_action_bar not found.\n", "No se encontró la cabecera main_feed_action_bar.\n") + describe(root, 60));
             manualFollowingHint();
             return;
         }
         AccessibilityNodeInfo logo = findLogo(header);
         if (logo == null) {
-            recordDebug("No se encontró el logo en la cabecera.\n" + describe(header, 40));
+            recordDebug(L.t("Logo not found in the header.\n", "No se encontró el logo en la cabecera.\n") + describe(header, 40));
             manualFollowingHint();
             return;
         }
@@ -548,7 +549,7 @@ public class BlockerService extends AccessibilityService
             manualFollowingHint();
             return;
         }
-        final String headerInfo = "Logo tocado: " + nodeLine(logo) + "\n" + describe(header, 30);
+        final String headerInfo = L.t("Logo tapped: ", "Logo tocado: ") + nodeLine(logo) + "\n" + describe(header, 30);
         pollFollowingOption(SystemClock.uptimeMillis() + 2500, before, headerInfo, MENU_FIRST_CHECK);
     }
 
@@ -569,8 +570,9 @@ public class BlockerService extends AccessibilityService
                     pollFollowingOption(deadline, before, headerInfo, MENU_CHECK_EVERY);
                     return;
                 }
-                recordDebug("No apareció «Siguiendo» tras tocar el logo.\n" + headerInfo + "\nVentanas:\n" + describeWindows());
-                Toast.makeText(BlockerService.this, "Toca el logo de Instagram arriba y elige «Siguiendo»", Toast.LENGTH_LONG).show();
+                recordDebug(L.t("“Following” didn’t appear after tapping the logo.\n", "No apareció «Siguiendo» tras tocar el logo.\n")
+                        + headerInfo + L.t("\nWindows:\n", "\nVentanas:\n") + describeWindows());
+                manualFollowingHint();
             }
         }, delay);
     }
@@ -745,14 +747,14 @@ public class BlockerService extends AccessibilityService
         try {
             for (AccessibilityWindowInfo w : getWindows()) {
                 AccessibilityNodeInfo r = w.getRoot();
-                sb.append("· ventana tipo ").append(w.getType()).append(' ')
+                sb.append(L.t("· window type ", "· ventana tipo ")).append(w.getType()).append(' ')
                         .append(r != null && r.getPackageName() != null ? r.getPackageName() : "?").append('\n');
                 if (r != null && r.getPackageName() != null && IG.equals(r.getPackageName().toString())) {
                     sb.append(describe(r, 25));
                 }
             }
         } catch (Exception e) {
-            sb.append("(no se pudieron leer las ventanas)\n");
+            sb.append(L.t("(couldn’t read the windows)\n", "(no se pudieron leer las ventanas)\n"));
         }
         return sb.toString();
     }
@@ -777,7 +779,8 @@ public class BlockerService extends AccessibilityService
     }
 
     private void manualFollowingHint() {
-        Toast.makeText(this, "Toca el logo de Instagram arriba y elige «Siguiendo»", Toast.LENGTH_LONG).show();
+        Toast.makeText(this, L.t("Tap the Instagram logo at the top and choose “Following”",
+                "Toca el logo de Instagram arriba y elige «Siguiendo»"), Toast.LENGTH_LONG).show();
     }
 
     /** Botón «Buscar» de la cortina de Explorar: abre la barra de búsqueda. */
@@ -789,7 +792,7 @@ public class BlockerService extends AccessibilityService
         if (field == null) field = visible(root, "explore_action_bar");
         pauseCurtain(1500);
         if (field == null || !click(field)) {
-            Toast.makeText(this, "Toca la barra de búsqueda de arriba", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, L.t("Tap the search bar at the top", "Toca la barra de búsqueda de arriba"), Toast.LENGTH_SHORT).show();
         }
     }
 
@@ -832,7 +835,7 @@ public class BlockerService extends AccessibilityService
                     CharSequence t = n.getText();
                     String label = d != null ? d.toString() : (t != null ? t.toString() : "");
                     if (label.length() > 40) label = label.substring(0, 40) + "…";
-                    selected.add((shortId != null ? shortId : "(sin id)") + (label.length() > 0 ? "  «" + label + "»" : ""));
+                    selected.add((shortId != null ? shortId : L.t("(no id)", "(sin id)")) + (label.length() > 0 ? "  «" + label + "»" : ""));
                 }
                 for (int i = 0; i < n.getChildCount(); i++) {
                     AccessibilityNodeInfo c = n.getChild(i);
@@ -846,10 +849,10 @@ public class BlockerService extends AccessibilityService
         sb.append(new SimpleDateFormat("HH:mm:ss", Locale.ROOT).format(new Date()))
                 .append("  ·  ").append(ids.size()).append(" IDs\n");
         if (!selected.isEmpty()) {
-            sb.append("Seleccionado (pestaña activa):\n");
+            sb.append(L.t("Selected (active tab):\n", "Seleccionado (pestaña activa):\n"));
             for (String s : selected) sb.append("  ").append(s).append('\n');
         }
-        sb.append("IDs visibles:\n");
+        sb.append(L.t("Visible IDs:\n", "IDs visibles:\n"));
         for (String s : ids) sb.append("  ").append(s).append('\n');
 
         getSharedPreferences(Diagnostics.PREFS, MODE_PRIVATE).edit()

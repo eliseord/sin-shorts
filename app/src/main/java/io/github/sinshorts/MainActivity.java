@@ -39,6 +39,7 @@ public class MainActivity extends Activity implements SharedPreferences.OnShared
     private View statusDot;
     private Button fixButton;
     private EditText customRules;
+    private boolean createdInSpanish;
 
     private static final Map<String, String> FRIENDLY = new HashMap<String, String>();
 
@@ -55,6 +56,8 @@ public class MainActivity extends Activity implements SharedPreferences.OnShared
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
+        L.init(this);
+        createdInSpanish = L.es();
         prefs = getSharedPreferences(Rules.PREFS, MODE_PRIVATE);
         ui = new Ui(this);
 
@@ -73,7 +76,8 @@ public class MainActivity extends Activity implements SharedPreferences.OnShared
 
         // ---- Cabecera
         page.addView(ui.text("Sin Shorts", 30, ui.fg, true));
-        TextView sub = ui.text("Bloquea Shorts, Reels y Spotlight. El resto de cada app sigue funcionando.", 15, ui.fgMuted, false);
+        TextView sub = ui.text(L.t("Blocks Shorts, Reels and Spotlight. Everything else in each app keeps working.",
+                "Bloquea Shorts, Reels y Spotlight. El resto de cada app sigue funcionando."), 15, ui.fgMuted, false);
         sub.setPadding(0, ui.dp(4), 0, ui.dp(18));
         page.addView(sub);
 
@@ -91,7 +95,7 @@ public class MainActivity extends Activity implements SharedPreferences.OnShared
         statusBody = ui.text("", 14, ui.fgMuted, false);
         statusBody.setPadding(0, ui.dp(6), 0, 0);
         status.addView(statusBody);
-        fixButton = ui.primary("Configurar ahora");
+        fixButton = ui.primary(L.t("Set up now", "Configurar ahora"));
         fixButton.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -102,7 +106,8 @@ public class MainActivity extends Activity implements SharedPreferences.OnShared
 
         // ---- Interruptor general y contador
         LinearLayout main = ui.card(page);
-        Switch master = toggle(main, "Bloqueo activado", "Desactívalo para hacer una pausa sin tocar los ajustes de accesibilidad.",
+        Switch master = toggle(main, L.t("Blocking on", "Bloqueo activado"), L.t("Turn it off to take a break without touching accessibility settings.",
+                        "Desactívalo para hacer una pausa sin tocar los ajustes de accesibilidad."),
                 Rules.KEY_ENABLED, true);
         master.setTypeface(Typeface.DEFAULT_BOLD);
         countText = ui.text("", 14, ui.fgMuted, false);
@@ -110,21 +115,30 @@ public class MainActivity extends Activity implements SharedPreferences.OnShared
         main.addView(countText);
 
         // ---- Categorías
-        section(page, "Qué bloquear");
+        section(page, L.t("What to block", "Qué bloquear"));
         LinearLayout cats = ui.card(page);
         for (int i = 0; i < Rules.CATEGORIES.length; i++) {
             Rules.Category c = Rules.CATEGORIES[i];
             if (i > 0) ui.divider(cats);
-            toggle(cats, c.title, c.subtitle, c.key, c.defaultOn);
+            toggle(cats, c.title(), c.subtitle(), c.key, c.defaultOn);
         }
 
         // ---- Opciones
-        section(page, "Opciones");
+        section(page, L.t("Options", "Opciones"));
         LinearLayout opts = ui.card(page);
-        toggle(opts, "Avisar al bloquear", "Muestra un mensaje breve cada vez que te saca de un vídeo corto.",
+        // Idioma de la app
+        LinearLayout langRow = new LinearLayout(this);
+        langRow.setGravity(Gravity.CENTER_VERTICAL);
+        langRow.addView(ui.text(L.t("Language", "Idioma"), 16, ui.fg, false), ui.weight());
+        langRow.addView(langButton("English", false));
+        langRow.addView(langButton("Español", true));
+        opts.addView(langRow, ui.fullWidth(0));
+        ui.divider(opts);
+        toggle(opts, L.t("Notify when blocking", "Avisar al bloquear"), L.t("Shows a short message each time it takes you out of a short video.",
+                        "Muestra un mensaje breve cada vez que te saca de un vídeo corto."),
                 Rules.KEY_TOAST, true);
         ui.divider(opts);
-        Button guide = ui.button("Repetir la configuración guiada");
+        Button guide = ui.button(L.t("Repeat the setup guide", "Repetir la configuración guiada"));
         guide.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
         guide.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -135,10 +149,12 @@ public class MainActivity extends Activity implements SharedPreferences.OnShared
         opts.addView(guide, ui.fullWidth(0));
 
         // ---- Reglas personalizadas
-        section(page, "Reglas personalizadas");
+        section(page, L.t("Custom rules", "Reglas personalizadas"));
         LinearLayout custom = ui.card(page);
-        custom.addView(ui.text("Si una app cambia y deja de bloquearse, añade aquí una regla con el ID que veas en el modo diagnóstico. "
-                + "Formato: paquete | tipo:valor. Tipos: id, idsel (pestaña seleccionada), text, textsel, url, app.", 14, ui.fgMuted, false));
+        custom.addView(ui.text(L.t("If an app changes and stops being blocked, add a rule here with the ID you see in diagnostic mode. "
+                        + "Format: package | type:value. Types: id, idsel (selected tab), text, textsel, url, app.",
+                "Si una app cambia y deja de bloquearse, añade aquí una regla con el ID que veas en el modo diagnóstico. "
+                        + "Formato: paquete | tipo:valor. Tipos: id, idsel (pestaña seleccionada), text, textsel, url, app."), 14, ui.fgMuted, false));
         customRules = new EditText(this);
         customRules.setTypeface(Typeface.MONOSPACE);
         customRules.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
@@ -151,11 +167,11 @@ public class MainActivity extends Activity implements SharedPreferences.OnShared
         customRules.setGravity(Gravity.TOP | Gravity.START);
         customRules.setHint("com.google.android.youtube | id:reel_recycler");
         String saved = prefs.getString(Rules.KEY_CUSTOM, "");
-        customRules.setText(saved.length() > 0 ? saved : Rules.CUSTOM_HELP);
+        customRules.setText(saved.length() > 0 ? saved : Rules.customHelp());
         custom.addView(customRules, ui.fullWidth(8));
         customFeedback = ui.text("", 13, ui.fgMuted, false);
         custom.addView(customFeedback);
-        Button save = ui.button("Guardar reglas");
+        Button save = ui.button(L.t("Save rules", "Guardar reglas"));
         save.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -163,24 +179,28 @@ public class MainActivity extends Activity implements SharedPreferences.OnShared
                 prefs.edit().putString(Rules.KEY_CUSTOM, t).apply();
                 int bad = Rules.countInvalid(t);
                 customFeedback.setTextColor(bad == 0 ? ui.ok : ui.warn);
-                customFeedback.setText(bad == 0 ? "Guardado." : "Guardado, pero " + bad
-                        + (bad == 1 ? " línea no tiene" : " líneas no tienen") + " un formato válido y se ignora"
-                        + (bad == 1 ? "." : "n."));
+                customFeedback.setText(bad == 0 ? L.t("Saved.", "Guardado.") : L.t(
+                        "Saved, but " + bad + (bad == 1 ? " line is" : " lines are") + " not in a valid format and will be ignored.",
+                        "Guardado, pero " + bad + (bad == 1 ? " línea no tiene" : " líneas no tienen")
+                                + " un formato válido y se ignora" + (bad == 1 ? "." : "n.")));
             }
         });
         custom.addView(save);
 
         // ---- Diagnóstico
-        section(page, "Modo diagnóstico");
+        section(page, L.t("Diagnostic mode", "Modo diagnóstico"));
         LinearLayout diag = ui.card(page);
-        diag.addView(ui.text("Actívalo, abre la sección que quieras bloquear (por ejemplo, la pestaña Reels) y vuelve aquí: "
-                + "verás los IDs de esa pantalla. Lo marcado como «Seleccionado» suele ser la pestaña activa, ideal para una regla idsel. "
-                + "Todo se queda en el teléfono. Apágalo cuando termines.", 14, ui.fgMuted, false));
-        toggle(diag, "Capturar IDs de pantalla", null, Rules.KEY_DIAG, false);
+        diag.addView(ui.text(L.t("Turn it on, open the section you want to block (for example, the Reels tab) and come back here: "
+                        + "you’ll see the IDs on that screen. Whatever is marked “Selected” is usually the active tab, ideal for an idsel rule. "
+                        + "Everything stays on the phone. Turn it off when you’re done.",
+                "Actívalo, abre la sección que quieras bloquear (por ejemplo, la pestaña Reels) y vuelve aquí: "
+                        + "verás los IDs de esa pantalla. Lo marcado como «Seleccionado» suele ser la pestaña activa, ideal para una regla idsel. "
+                        + "Todo se queda en el teléfono. Apágalo cuando termines."), 14, ui.fgMuted, false));
+        toggle(diag, L.t("Capture screen IDs", "Capturar IDs de pantalla"), null, Rules.KEY_DIAG, false);
         LinearLayout diagButtons = new LinearLayout(this);
-        Button refresh = ui.button("Actualizar");
-        Button copy = ui.button("Copiar");
-        Button clear = ui.button("Borrar");
+        Button refresh = ui.button(L.t("Refresh", "Actualizar"));
+        Button copy = ui.button(L.t("Copy", "Copiar"));
+        Button clear = ui.button(L.t("Clear", "Borrar"));
         diagButtons.addView(refresh, ui.weight());
         diagButtons.addView(copy, ui.weight());
         diagButtons.addView(clear, ui.weight());
@@ -200,8 +220,8 @@ public class MainActivity extends Activity implements SharedPreferences.OnShared
             @Override
             public void onClick(View v) {
                 ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
-                cm.setPrimaryClip(ClipData.newPlainText("Sin Shorts diagnóstico", diagOutput.getText()));
-                Toast.makeText(MainActivity.this, "Copiado", Toast.LENGTH_SHORT).show();
+                cm.setPrimaryClip(ClipData.newPlainText("Sin Shorts diagnostics", diagOutput.getText()));
+                Toast.makeText(MainActivity.this, L.t("Copied", "Copiado"), Toast.LENGTH_SHORT).show();
             }
         });
         clear.setOnClickListener(new View.OnClickListener() {
@@ -212,7 +232,8 @@ public class MainActivity extends Activity implements SharedPreferences.OnShared
             }
         });
 
-        TextView footer = ui.text("Sin permiso de Internet: nada sale de tu teléfono. Código abierto, licencia MIT.", 13, ui.fgMuted, false);
+        TextView footer = ui.text(L.t("No Internet permission: nothing leaves your phone. Open source, MIT licence.",
+                "Sin permiso de Internet: nada sale de tu teléfono. Código abierto, licencia MIT."), 13, ui.fgMuted, false);
         footer.setGravity(Gravity.CENTER);
         footer.setPadding(0, ui.dp(24), 0, 0);
         page.addView(footer);
@@ -221,6 +242,12 @@ public class MainActivity extends Activity implements SharedPreferences.OnShared
     @Override
     protected void onResume() {
         super.onResume();
+        // Si se cambió el idioma en la guía, volver a construir la pantalla
+        L.init(this);
+        if (L.es() != createdInSpanish) {
+            recreate();
+            return;
+        }
         prefs.registerOnSharedPreferenceChangeListener(this);
         refreshStatus();
         refreshCount();
@@ -244,14 +271,16 @@ public class MainActivity extends Activity implements SharedPreferences.OnShared
         boolean active = on && prefs.getBoolean(Rules.KEY_ENABLED, true);
         statusDot.setBackground(ui.dot(active ? ui.ok : ui.warn));
         if (!on) {
-            statusTitle.setText("Falta activar la protección");
-            statusBody.setText("Sin el servicio de accesibilidad no se puede bloquear nada. La guía te lleva paso a paso.");
+            statusTitle.setText(L.t("Protection needs to be turned on", "Falta activar la protección"));
+            statusBody.setText(L.t("Without the accessibility service nothing can be blocked. The guide walks you through it.",
+                    "Sin el servicio de accesibilidad no se puede bloquear nada. La guía te lleva paso a paso."));
         } else if (!active) {
-            statusTitle.setText("En pausa");
-            statusBody.setText("El servicio está activado, pero el bloqueo está en pausa.");
+            statusTitle.setText(L.t("Paused", "En pausa"));
+            statusBody.setText(L.t("The service is on, but blocking is paused.", "El servicio está activado, pero el bloqueo está en pausa."));
         } else {
-            statusTitle.setText("Protección activa");
-            statusBody.setText("Funciona sola en segundo plano. No hace falta tener la app abierta.");
+            statusTitle.setText(L.t("Protection active", "Protección activa"));
+            statusBody.setText(L.t("It works on its own in the background. You don’t need to keep the app open.",
+                    "Funciona sola en segundo plano. No hace falta tener la app abierta."));
         }
         fixButton.setVisibility(on ? View.GONE : View.VISIBLE);
     }
@@ -261,23 +290,46 @@ public class MainActivity extends Activity implements SharedPreferences.OnShared
         String today = new SimpleDateFormat("yyyy-MM-dd", Locale.ROOT).format(new Date());
         int c = today.equals(prefs.getString(Rules.KEY_COUNT_DAY, "")) ? prefs.getInt(Rules.KEY_COUNT, 0) : 0;
         int total = prefs.getInt(Rules.KEY_TOTAL, 0);
-        countText.setText("Bloqueados hoy: " + c + "   ·   En total: " + total);
+        countText.setText(L.t("Blocked today: " + c + "   ·   Total: " + total, "Bloqueados hoy: " + c + "   ·   En total: " + total));
     }
 
     private void refreshDiagnostics() {
         List<Diagnostics.Entry> list = Diagnostics.recent(this, 5);
         if (list.isEmpty()) {
             diagOutput.setText(prefs.getBoolean(Rules.KEY_DIAG, false)
-                    ? "Aún no hay capturas. Abre otra app, navega un poco y vuelve."
-                    : "Sin capturas.");
+                    ? L.t("No captures yet. Open another app, browse a little and come back.", "Aún no hay capturas. Abre otra app, navega un poco y vuelve.")
+                    : L.t("No captures.", "Sin capturas."));
             return;
         }
         StringBuilder sb = new StringBuilder();
         for (Diagnostics.Entry e : list) {
-            String name = FRIENDLY.containsKey(e.pkg) ? FRIENDLY.get(e.pkg) + " (" + e.pkg + ")" : e.pkg;
+            String name = Diagnostics.FOLLOWING_DEBUG.equals(e.pkg)
+                    ? L.t("Sin Shorts · “Open Following” failure", "Sin Shorts · fallo al abrir Siguiendo")
+                    : FRIENDLY.containsKey(e.pkg) ? FRIENDLY.get(e.pkg) + " (" + e.pkg + ")" : e.pkg;
             sb.append("━━ ").append(name).append('\n').append(e.text).append('\n');
         }
         diagOutput.setText(sb.toString().trim());
+    }
+
+    private Button langButton(String label, final boolean spanish) {
+        boolean on = L.es() == spanish;
+        Button b = on ? ui.primary(label) : ui.button(label);
+        b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        b.setMinHeight(ui.dp(38));
+        b.setMinimumHeight(ui.dp(38));
+        b.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                if (L.es() == spanish) return;
+                L.set(MainActivity.this, spanish);
+                recreate();
+            }
+        });
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        lp.leftMargin = ui.dp(6);
+        b.setLayoutParams(lp);
+        return b;
     }
 
     private void section(LinearLayout parent, String title) {
