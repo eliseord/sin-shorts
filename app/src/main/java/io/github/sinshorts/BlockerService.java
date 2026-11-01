@@ -11,7 +11,6 @@ import android.os.SystemClock;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
 import android.view.accessibility.AccessibilityWindowInfo;
-import android.widget.Toast;
 
 import java.text.SimpleDateFormat;
 import java.util.ArrayDeque;
@@ -65,6 +64,7 @@ public class BlockerService extends AccessibilityService
     private final Handler handler = new Handler(Looper.getMainLooper());
     private SharedPreferences prefs;
     private Curtain curtain;
+    private Notice notice;
 
     private volatile List<Rules.Rule> rules;
     private volatile Set<String> watched = new HashSet<String>();
@@ -102,6 +102,7 @@ public class BlockerService extends AccessibilityService
         prefs = getSharedPreferences(Rules.PREFS, MODE_PRIVATE);
         prefs.registerOnSharedPreferenceChangeListener(this);
         curtain = new Curtain(this, this);
+        notice = new Notice(this);
         reload();
 
         ignoredForDiag.add(getPackageName());
@@ -312,8 +313,9 @@ public class BlockerService extends AccessibilityService
 
         countBlock();
         if (toast) {
-            Toast.makeText(this, goHome && rule.type == Rules.APP
-                    ? L.t("Sin Shorts: app blocked", "Sin Shorts: app bloqueada") : L.t("Sin Shorts: short video blocked", "Sin Shorts: vídeo corto bloqueado"), Toast.LENGTH_SHORT).show();
+            notice.show(goHome && rule.type == Rules.APP
+                    ? L.t("Sin Shorts: app blocked", "Sin Shorts: app bloqueada")
+                    : L.t("Sin Shorts: short video blocked", "Sin Shorts: vídeo corto bloqueado"), 1800);
         }
         scheduleRecheck();
     }
@@ -779,8 +781,8 @@ public class BlockerService extends AccessibilityService
     }
 
     private void manualFollowingHint() {
-        Toast.makeText(this, L.t("Tap the Instagram logo at the top and choose “Following”",
-                "Toca el logo de Instagram arriba y elige «Siguiendo»"), Toast.LENGTH_LONG).show();
+        notice.show(L.t("Tap the Instagram logo at the top and choose “Following”",
+                "Toca el logo de Instagram arriba y elige «Siguiendo»"), 3500);
     }
 
     /** Botón «Buscar» de la cortina de Explorar: abre la barra de búsqueda. */
@@ -792,7 +794,7 @@ public class BlockerService extends AccessibilityService
         if (field == null) field = visible(root, "explore_action_bar");
         pauseCurtain(1500);
         if (field == null || !click(field)) {
-            Toast.makeText(this, L.t("Tap the search bar at the top", "Toca la barra de búsqueda de arriba"), Toast.LENGTH_SHORT).show();
+            notice.show(L.t("Tap the search bar at the top", "Toca la barra de búsqueda de arriba"), 2500);
         }
     }
 
@@ -876,6 +878,7 @@ public class BlockerService extends AccessibilityService
     public void onDestroy() {
         handler.removeCallbacksAndMessages(null);
         if (curtain != null) curtain.hide();
+        if (notice != null) notice.destroy();
         if (prefs != null) prefs.unregisterOnSharedPreferenceChangeListener(this);
         super.onDestroy();
     }
