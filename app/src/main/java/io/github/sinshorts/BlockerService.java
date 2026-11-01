@@ -510,7 +510,7 @@ public class BlockerService extends AccessibilityService
     @Override
     public void openFollowingFeed() {
         // Quitar la cortina primero: el menú del logo se abre justo encima del feed
-        pauseCurtain(4000);
+        pauseCurtain(4500);
         handler.postDelayed(new Runnable() {
             @Override
             public void run() {
@@ -552,31 +552,105 @@ public class BlockerService extends AccessibilityService
             return;
         }
         final String headerInfo = L.t("Logo tapped: ", "Logo tocado: ") + nodeLine(logo) + "\n" + describe(header, 30);
-        pollFollowingOption(SystemClock.uptimeMillis() + 2500, before, headerInfo, MENU_FIRST_CHECK);
+        MenuAttempt m = new MenuAttempt();
+        m.deadline = SystemClock.uptimeMillis() + 3200;
+        m.started = SystemClock.uptimeMillis();
+        m.before = before;
+        m.headerInfo = headerInfo;
+        m.logo = boundsOf(logo);
+        pollFollowingOption(m, MENU_FIRST_CHECK);
     }
 
     private static final long MENU_FIRST_CHECK = 120;  // ms: lo antes que suele empezar a verse el menú
     private static final long MENU_CHECK_EVERY = 70;   // ms entre comprobaciones
+    private static final long TAP_RESULT_WAIT = 350;   // ms para ver si el toque cerró el menú
+    private static final long LOGO_RETRY_AFTER = 1100; // ms sin menú → volver a tocar el logo
 
-    /** Espera a que aparezca el menú y toca «Siguiendo» en cuanto esté. */
-    private void pollFollowingOption(final long deadline, final Set<String> before, final String headerInfo, long delay) {
+    /** Estado de un intento de abrir «Siguiendo». */
+    private static final class MenuAttempt {
+        long deadline, started, lastTapAt;
+        Set<String> before;
+        String headerInfo;
+        Rect logo;
+        String lastBounds;  // posición de «Siguiendo» en la lectura anterior
+        int taps;
+        boolean logoRetried;
+    }
+
+    /**
+     * Espera a que el menú del logo esté abierto y QUIETO (misma posición en dos
+     * lecturas seguidas: la animación de apertura ya terminó), toca «Siguiendo»
+     * y comprueba que el menú se cerró; si no, lo reintenta.
+     */
+    private void pollFollowingOption(final MenuAttempt m, long delay) {
         handler.postDelayed(new Runnable() {
             @Override
             public void run() {
-                AccessibilityNodeInfo option = findFollowingOption(before);
-                if (option != null && tapNode(option)) {
-                    pauseCurtain(1500);
+                long now = SystemClock.uptimeMillis();
+
+                if (m.taps > 0) {
+                    // Ya se tocó: ¿se cerró el menú?
+                    if (!menuOpen()) {
+                        pauseCurtain(1500);
+                        return;
+                    }
+                    if (now - m.lastTapAt < TAP_RESULT_WAIT) {
+                        retry();
+                        return;
+                    }
+                }
+
+                AccessibilityNodeInfo option = m.taps == 0 ? findFollowingOption(m.before) : firstFollowingLabel();
+                if (option != null) {
+                    String bounds = boundsOf(option).flattenToString();
+                    if (bounds.equals(m.lastBounds) && m.taps < 3) {
+                        // Primer intento: toque como un dedo. Siguientes: acción de accesibilidad.
+                        boolean ok = m.taps == 0 ? tapNode(option) : (click(option) || tapNode(option));
+                        if (ok) {
+                            m.taps++;
+                            m.lastTapAt = now;
+                        }
+                    }
+                    m.lastBounds = bounds;
+                } else if (m.taps == 0 && !m.logoRetried && now - m.started > LOGO_RETRY_AFTER) {
+                    // El menú no llegó a abrirse: tocar el logo otra vez
+                    m.logoRetried = true;
+                    tapAt(m.logo);
+                }
+
+                if (now < m.deadline) {
+                    retry();
                     return;
                 }
-                if (SystemClock.uptimeMillis() < deadline) {
-                    pollFollowingOption(deadline, before, headerInfo, MENU_CHECK_EVERY);
-                    return;
-                }
-                recordDebug(L.t("“Following” didn’t appear after tapping the logo.\n", "No apareció «Siguiendo» tras tocar el logo.\n")
-                        + headerInfo + L.t("\nWindows:\n", "\nVentanas:\n") + describeWindows());
+                recordDebug(L.t("“Following” didn’t open after tapping the logo (taps on the option: ",
+                        "No se abrió «Siguiendo» tras tocar el logo (toques en la opción: ") + m.taps + ").\n"
+                        + m.headerInfo + L.t("\nWindows:\n", "\nVentanas:\n") + describeWindows());
                 manualFollowingHint();
             }
+
+            private void retry() {
+                pollFollowingOption(m, MENU_CHECK_EVERY);
+            }
         }, delay);
+    }
+
+    /** «Siguiendo» del menú ya abierto (para reintentar el toque). */
+    private AccessibilityNodeInfo firstFollowingLabel() {
+        List<AccessibilityNodeInfo> nodes = labelNodes(FOLLOWING_LABELS);
+        return nodes.isEmpty() ? null : nodes.get(0);
+    }
+
+    private boolean tapAt(Rect b) {
+        if (b == null || b.isEmpty() || android.os.Build.VERSION.SDK_INT < 24) return false;
+        try {
+            android.graphics.Path path = new android.graphics.Path();
+            path.moveTo(b.centerX(), b.centerY());
+            return dispatchGesture(new android.accessibilityservice.GestureDescription.Builder()
+                    .addStroke(new android.accessibilityservice.GestureDescription.StrokeDescription(path, 0, 60))
+                    .build(), null, null);
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     /**
