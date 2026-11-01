@@ -24,8 +24,8 @@ import android.widget.Toast;
  */
 public class OnboardingActivity extends Activity {
 
-    private static final int WELCOME = 0, ACTIVATE = 1, BATTERY = 2, CHOOSE = 3, TEST = 4, DONE = 5;
-    private static final int STEPS = 6;
+    private static final int WELCOME = 0, ACTIVATE = 1, BATTERY = 2, CHOOSE = 3, TEST = 4, PROTECT = 5, DONE = 6;
+    private static final int STEPS = 7;
     private static final String STATE_STEP = "step";
 
     private Ui ui;
@@ -160,6 +160,7 @@ public class OnboardingActivity extends Activity {
 
     private void go(int target) {
         handler.removeCallbacksAndMessages(null);
+        if (target == PROTECT && Setup.installedFromPlayStore(this)) target = target > step ? DONE : TEST;
         step = Math.max(WELCOME, Math.min(DONE, target));
         render();
         scroll.scrollTo(0, 0);
@@ -191,6 +192,7 @@ public class OnboardingActivity extends Activity {
             case BATTERY: renderBattery(); break;
             case CHOOSE: renderChoose(); break;
             case TEST: renderTest(); break;
+            case PROTECT: renderProtect(); break;
             default: renderDone(); break;
         }
     }
@@ -205,7 +207,11 @@ public class OnboardingActivity extends Activity {
             lp.rightMargin = ui.dp(6);
             dots.addView(d, lp);
         }
-        stepLabel.setText(step == WELCOME || step == DONE ? "" : L.t("Step " + step + " of " + (STEPS - 2), "Paso " + step + " de " + (STEPS - 2)));
+        stepLabel.setText(step == WELCOME || step == DONE ? "" : L.t("Step " + step + " of " + stepCount(), "Paso " + step + " de " + stepCount()));
+    }
+
+    private int stepCount() {
+        return Setup.installedFromPlayStore(this) ? STEPS - 3 : STEPS - 2;
     }
 
     private void title(String t) {
@@ -288,6 +294,14 @@ public class OnboardingActivity extends Activity {
                 L.t("Stop Android from pausing it to save battery", "Evitar que Android la detenga para ahorrar batería"),
                 L.t("Choose what to block", "Elegir qué quieres bloquear"),
                 L.t("Test that it works", "Probar que funciona"));
+        if (!Setup.installedFromPlayStore(this)) {
+            LinearLayout pp = ui.card(content);
+            pp.addView(ui.text(L.t("Installed from an APK?", "¿La instalaste desde un APK?"), 16, ui.fg, true));
+            TextView ppt = ui.text(L.t("You probably paused Play Protect to install it. At the end of this guide I’ll remind you to turn it back on.",
+                    "Seguramente pausaste Play Protect para instalarla. Al final de esta guía te recordaré volver a activarlo."), 14, ui.fgMuted, false);
+            ppt.setPadding(0, ui.dp(6), 0, 0);
+            pp.addView(ppt);
+        }
         LinearLayout c = ui.card(content);
         c.addView(ui.text(L.t("Your privacy", "Tu privacidad"), 16, ui.fg, true));
         TextView p = ui.text(L.t("The app has no Internet permission: it cannot send anything off your phone. "
@@ -368,12 +382,17 @@ public class OnboardingActivity extends Activity {
             });
 
             if (newAndroid && !justUnlocked) {
-                // Android no siempre deja comprobarlo: ofrecer la solución por si acaso
-                final LinearLayout help = numbered(null,
-                        L.t("Tap the switch and close the dialog that appears.", "Toca el interruptor y cierra el aviso que aparece."),
-                        L.t("Tap “Open app info”, tap ⋮ at the top right and choose “Allow restricted settings”.",
-                                "Pulsa «Abrir info de la app», toca ⋮ arriba a la derecha y elige «Permitir ajustes restringidos»."),
-                        L.t("Come back here and tap “Turn on” again.", "Vuelve aquí y pulsa «Activar» otra vez."));
+                // Android 13+ bloquea este ajuste en apps instaladas fuera de Play Store, y no siempre
+                // se puede detectar: mostrar siempre cómo desbloquearlo, sin esconderlo
+                LinearLayout help = numbered(L.t("If the switch is greyed out or you see “App was denied access”",
+                                "Si el interruptor está gris o sale «Se ha denegado el acceso a la aplicación»"),
+                        L.t("Close that dialog. Android does this with apps that don’t come from the Play Store.",
+                                "Cierra ese aviso. Android lo hace con las apps que no vienen de Play Store."),
+                        L.t("Tap “Open app info” below.", "Pulsa «Abrir info de la app» aquí abajo."),
+                        L.t("Tap the ⋮ menu at the top right and choose “Allow restricted settings”. Confirm with your fingerprint or PIN.",
+                                "Toca el menú ⋮ arriba a la derecha y elige «Permitir ajustes restringidos». Confirma con tu huella o PIN."),
+                        L.t("Come back here and tap “Turn on” again: the switch will now work.",
+                                "Vuelve aquí y pulsa «Activar» otra vez: ahora el interruptor funcionará."));
                 Button b = ui.button(L.t("Open app info", "Abrir info de la app"));
                 b.setOnClickListener(new View.OnClickListener() {
                     @Override
@@ -382,19 +401,9 @@ public class OnboardingActivity extends Activity {
                     }
                 });
                 help.addView(b);
-                help.setVisibility(triedToggle ? View.VISIBLE : View.GONE);
-                final Button toggleHelp = ui.button(L.t("Seeing “App was denied access” or “Restricted setting”?",
-                        "¿Sale «Se ha denegado el acceso» o «Ajuste restringido»?"));
-                toggleHelp.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
-                toggleHelp.setOnClickListener(new View.OnClickListener() {
-                    @Override
-                    public void onClick(View v) {
-                        help.setVisibility(help.getVisibility() == View.VISIBLE ? View.GONE : View.VISIBLE);
-                    }
-                });
-                content.removeView(help);
-                content.addView(toggleHelp, ui.fullWidth(10));
-                content.addView(help);
+                TextView note = ui.text(L.t("The ⋮ option only appears after you’ve tried the switch once.",
+                        "La opción del menú ⋮ solo aparece después de haber probado el interruptor una vez."), 13, ui.fgMuted, false);
+                help.addView(note);
             }
         }
         setNext(L.t("Do it later", "Lo haré después"));
@@ -507,6 +516,35 @@ public class OnboardingActivity extends Activity {
             testRunning = false;
             Toast.makeText(this, L.t("Couldn’t open the link", "No se pudo abrir el enlace"), Toast.LENGTH_SHORT).show();
         }
+    }
+
+    private void renderProtect() {
+        title(L.t("Turn Play Protect back on", "Vuelve a activar Play Protect"));
+        body(L.t("To install Sin Shorts from an APK you had to pause Play Protect. Turn it back on now: it protects you from "
+                        + "harmful apps and doesn’t affect Sin Shorts once it’s installed.",
+                "Para instalar Sin Shorts desde un APK tuviste que pausar Play Protect. Vuelve a activarlo ahora: te protege de "
+                        + "apps dañinas y no afecta a Sin Shorts una vez instalada."));
+        numbered(null,
+                L.t("Tap “Open Play Protect”.", "Pulsa «Abrir Play Protect»."),
+                L.t("Tap the ⚙ gear at the top right.", "Toca el engranaje ⚙ arriba a la derecha."),
+                L.t("Turn on “Scan apps with Play Protect”.", "Activa «Analizar apps con Play Protect»."),
+                L.t("Come back here with the Back button.", "Vuelve aquí con el botón Atrás."));
+        action(L.t("Open Play Protect", "Abrir Play Protect"), true, new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                if (!Setup.openPlayProtect(OnboardingActivity.this)) {
+                    Toast.makeText(OnboardingActivity.this, L.t("Open the Play Store › your profile picture › Play Protect",
+                            "Abre Play Store › tu foto de perfil › Play Protect"), Toast.LENGTH_LONG).show();
+                }
+            }
+        });
+        TextView note = ui.text(L.t("If Play Protect later shows a notice about Sin Shorts, it’s because of the accessibility permission. "
+                        + "You can keep the app.",
+                "Si más adelante Play Protect muestra un aviso sobre Sin Shorts, es por el permiso de accesibilidad. "
+                        + "Puedes conservar la app."), 13, ui.fgMuted, false);
+        note.setPadding(0, ui.dp(14), 0, 0);
+        content.addView(note);
+        setNext(L.t("Done, next", "Hecho, seguir"));
     }
 
     private void renderDone() {

@@ -88,6 +88,33 @@ public final class Setup {
         }
     }
 
+    /** ¿Se instaló desde Google Play? Entonces no hizo falta pausar Play Protect. */
+    @SuppressWarnings("deprecation")
+    public static boolean installedFromPlayStore(Context c) {
+        try {
+            return "com.android.vending".equals(c.getPackageManager().getInstallerPackageName(c.getPackageName()));
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /** Abre los ajustes de Play Protect; si no se puede, la Play Store. */
+    public static boolean openPlayProtect(Activity a) {
+        try {
+            Intent i = new Intent();
+            i.setClassName("com.google.android.gms", "com.google.android.gms.security.settings.VerifyAppsSettingsActivity");
+            a.startActivity(i);
+            return true;
+        } catch (Exception ignored) {
+        }
+        try {
+            Intent i = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER).setPackage("com.android.vending");
+            a.startActivity(i);
+        } catch (Exception ignored) {
+        }
+        return false;
+    }
+
     /** Abre un enlace en la app que lo maneje (YouTube, Instagram) o en el navegador. */
     public static boolean openLink(Activity a, String url) {
         try {
