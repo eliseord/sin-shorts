@@ -1,0 +1,4 @@
+// Para abrir el proyecto en Android Studio. La compilación probada es ./build.sh
+plugins {
+    id 'com.android.application' version '8.7.3' apply false
+}

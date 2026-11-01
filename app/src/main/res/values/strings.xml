@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Sin Shorts</string>
+    <string name="service_label">Sin Shorts</string>
+    <string name="service_description">Detecta cuando abres Shorts de YouTube, Reels de Instagram o Facebook, Spotlight de Snapchat o vídeos cortos en el navegador, y te saca de ahí automáticamente. El resto de cada app sigue funcionando. Solo lee la estructura de la pantalla para reconocer esas secciones; no guarda lo que ves ni envía nada fuera del teléfono (la app no tiene permiso de Internet).</string>
+</resources>

@@ -1,0 +1,23 @@
+name: Compilar APK
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Herramientas de Android
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y openjdk-17-jdk-headless aapt apksigner dalvik-exchange zipalign curl
+      - name: Compilar
+        env:
+          KS_PASS: ${{ secrets.KS_PASS || 'sinshorts' }}
+        run: ./build.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SinShorts-apk
+          path: build/SinShorts.apk
