@@ -31,6 +31,9 @@ final class Curtain {
 
         /** Has tocado la pantalla fuera de la cortina (historias, mensajes, pestañas…). */
         void onOutsideTouch();
+
+        /** Has deslizado horizontalmente sobre la cortina (coordenadas de pantalla). */
+        void onHorizontalSwipe(float x0, float y0, float x1, float y1, long durationMs);
     }
 
     private final AccessibilityService service;
@@ -39,6 +42,7 @@ final class Curtain {
 
     private View view;
     private int mode = NONE;
+    private boolean passThrough;
     private final Rect bounds = new Rect();
 
     Curtain(AccessibilityService service, Actions actions) {
@@ -76,7 +80,19 @@ final class Curtain {
     }
 
     /** Quitar al momento (por ejemplo, al salir de Instagram). */
+    void setPassThrough(boolean on) {
+        if (passThrough == on) return;
+        passThrough = on;
+        if (view != null) {
+            try {
+                wm.updateViewLayout(view, params(bounds, mode));
+            } catch (Exception ignored) {
+            }
+        }
+    }
+
     void hide() {
+        passThrough = false;
         if (view != null) {
             try {
                 wm.removeView(view);
@@ -95,6 +111,8 @@ final class Curtain {
                 | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
                 // Avisar al instante de cualquier toque fuera de la cortina
                 | WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH;
+        // Durante un gesto reenviado a Instagram, la cortina se ve pero deja pasar los toques
+        if (passThrough) flags |= WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
         WindowManager.LayoutParams p = new WindowManager.LayoutParams(
                 r.width(), r.height(),
                 WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
@@ -130,14 +148,32 @@ final class Curtain {
         box.setPadding(dp(28), dp(16), dp(28), dp(16));
         // Consumir los toques: así el feed de debajo no se puede deslizar
         box.setClickable(true);
+        final boolean homeMode = m == HOME_FEED;
         box.setOnTouchListener(new View.OnTouchListener() {
+            float x0, y0;
+            long t0;
+
             @Override
             public boolean onTouch(View v, android.view.MotionEvent e) {
-                if (e.getActionMasked() == android.view.MotionEvent.ACTION_OUTSIDE) {
-                    actions.onOutsideTouch();
-                    return true;
+                switch (e.getActionMasked()) {
+                    case android.view.MotionEvent.ACTION_OUTSIDE:
+                        actions.onOutsideTouch();
+                        return true;
+                    case android.view.MotionEvent.ACTION_DOWN:
+                        x0 = e.getRawX();
+                        y0 = e.getRawY();
+                        t0 = e.getEventTime();
+                        return true;
+                    case android.view.MotionEvent.ACTION_UP:
+                        float dx = e.getRawX() - x0, dy = e.getRawY() - y0;
+                        // Deslizamiento claramente horizontal: pasárselo a Instagram
+                        if (homeMode && Math.abs(dx) > dp(48) && Math.abs(dx) > 1.5f * Math.abs(dy)) {
+                            actions.onHorizontalSwipe(x0, y0, e.getRawX(), y0, e.getEventTime() - t0);
+                        }
+                        return true;
+                    default:
+                        return true;
                 }
-                return false;
             }
         });
 

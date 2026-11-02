@@ -78,6 +78,17 @@ public class BlockerService extends AccessibilityService
 
     private long lastDiag;
     private final Set<String> ignoredForDiag = new HashSet<String>();
+    private final Set<String> launcherPkgs = new HashSet<String>();
+
+    /** Tras un toque fuera de la cortina: vigilar Instagram muy seguido durante un instante. */
+    private static final long OUTSIDE_WATCH = 700, OUTSIDE_TICK = 50;
+    private long outsideWatchUntil;
+    private final Runnable outsideTick = new Runnable() {
+        @Override
+        public void run() {
+            outsideCheck();
+        }
+    };
 
     /** Tras un cambio en Instagram, volver a mirar unas veces aunque no lleguen más eventos. */
     private int settleRuns;
@@ -112,6 +123,7 @@ public class BlockerService extends AccessibilityService
             Intent home = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME);
             for (ResolveInfo ri : getPackageManager().queryIntentActivities(home, 0)) {
                 ignoredForDiag.add(ri.activityInfo.packageName);
+                launcherPkgs.add(ri.activityInfo.packageName);
             }
         } catch (Exception ignored) {
         }
@@ -143,7 +155,13 @@ public class BlockerService extends AccessibilityService
 
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {
-        if (event == null || event.getPackageName() == null) return;
+        if (event == null) return;
+        // La lista de ventanas cambió: si aparece el escritorio (gesto de salir), quitar la cortina ya
+        if (event.getEventType() == AccessibilityEvent.TYPE_WINDOWS_CHANGED) {
+            if (curtain != null && curtain.mode() != Curtain.NONE && launcherVisible()) curtain.hide();
+            return;
+        }
+        if (event.getPackageName() == null) return;
         String pkg = event.getPackageName().toString();
 
         // Si cambias a otra app (o bajas las notificaciones), quitar la cortina
@@ -165,19 +183,35 @@ public class BlockerService extends AccessibilityService
 
         if (pkg.equals(IG)) {
             settleRuns = 0;
-            if (event.getEventType() == AccessibilityEvent.TYPE_VIEW_CLICKED && curtain.mode() != Curtain.NONE) {
-                handler.removeCallbacks(scanTask);
-                scanPending = true;
-                if (isHomeTabClick(event)) {
-                    // Tocar «Inicio» te deja en el inicio: la cortina se queda, solo se recoloca
-                    handler.postDelayed(scanTask, 80);
-                } else {
-                    // Mensajes, historias, otra pestaña…: fuera la cortina ya; luego se comprueba
-                    curtain.hide();
-                    softHideSince = 0;
-                    handler.postDelayed(scanTask, 250);
+            // Justo después de un toque fuera: comprobar en el acto, sin esperas
+            if (SystemClock.uptimeMillis() < outsideWatchUntil) {
+                handler.removeCallbacks(outsideTick);
+                handler.post(outsideTick);
+            }
+            if (event.getEventType() == AccessibilityEvent.TYPE_VIEW_CLICKED) {
+                String clicked = clickedId(event);
+                if (clicked.endsWith(":id/search_tab")) {
+                    // Entrar en Explorar: comprobar casi al instante para taparlo antes de que se vea
+                    if (curtain.mode() == Curtain.HOME_FEED) curtain.hide();
+                    settleRuns = 0;
+                    handler.removeCallbacks(scanTask);
+                    scanPending = true;
+                    handler.postDelayed(scanTask, 40);
+                    return;
                 }
-                return;
+                if (curtain.mode() != Curtain.NONE) {
+                    if (clicked.endsWith(":id/feed_tab")) {
+                        // Tocar «Inicio» te deja en el inicio: la cortina se queda, solo se recoloca
+                        handler.removeCallbacks(scanTask);
+                        scanPending = true;
+                        handler.postDelayed(scanTask, 80);
+                    } else {
+                        // Mensajes, otra pestaña…: retirarla mientras dura la transición, sin que reaparezca a mitad
+                        softHideSince = 0;
+                        pauseCurtain(350);
+                    }
+                    return;
+                }
             }
         }
 
@@ -241,7 +275,7 @@ public class BlockerService extends AccessibilityService
                 if (nodes == null) return false;
                 for (AccessibilityNodeInfo n : nodes) {
                     if (n == null || !n.isVisibleToUser()) continue;
-                    if (rule.type == Rules.ID || isSelected(n)) return true;
+                    if (rule.type == Rules.ID_SEL ? isSelected(n) : dominant(root, n)) return true;
                 }
                 return false;
             }
@@ -271,6 +305,29 @@ public class BlockerService extends AccessibilityService
             }
         }
         return false;
+    }
+
+    /**
+     * La vista ocupa la mayor parte del ancho de la pantalla. Evita actuar sobre un trozo de
+     * Reels o Shorts que asoma por el borde durante una animación de deslizamiento (eso
+     * provocaba dos «Atrás» seguidos y cerraba Instagram).
+     */
+    private static boolean dominant(AccessibilityNodeInfo root, AccessibilityNodeInfo n) {
+        Rect w = boundsOf(root), b = boundsOf(n);
+        return w.width() <= 0 || b.width() >= w.width() * 0.6f;
+    }
+
+    private static String clickedId(AccessibilityEvent event) {
+        try {
+            AccessibilityNodeInfo src = event.getSource();
+            for (int i = 0; i < 3 && src != null; i++) {
+                String id = src.getViewIdResourceName();
+                if (id != null && (id.endsWith(":id/feed_tab") || id.endsWith(":id/search_tab"))) return id;
+                src = src.getParent();
+            }
+        } catch (Exception ignored) {
+        }
+        return "";
     }
 
     private static String fullId(String pkg, String value) {
@@ -366,6 +423,12 @@ public class BlockerService extends AccessibilityService
             curtain.hide();
             return;
         }
+        // Con la cortina del inicio puesta, si desaparece la barra de pestañas es que se está
+        // abriendo algo a pantalla completa (una historia): quitarla ya, sin esperar al visor
+        if (curtain.mode() == Curtain.HOME_FEED && visible(root, "tab_bar") == null && visible(root, "feed_tab") == null) {
+            curtain.hide();
+            return;
+        }
 
         // Una pantalla con botón «Atrás» (feed Siguiendo, un post, mensajes…) nunca se tapa
         if (visible(root, "action_bar_button_back") != null) {
@@ -389,12 +452,17 @@ public class BlockerService extends AccessibilityService
             }
         }
 
-        if (igExplore && selected(root, "search_tab") && visible(root, "grid_card_layout_container") != null) {
+        if (igExplore && selected(root, "search_tab")) {
             AccessibilityNodeInfo field = visible(root, "action_bar_search_edit_text");
-            if (field == null || !field.isFocused()) {
+            boolean typing = field != null && (field.isFocused() || hasTypedText(field));
+            AccessibilityNodeInfo bar = visible(root, "explore_action_bar");
+            boolean grid = visible(root, "grid_card_layout_container") != null;
+            // Tapar en cuanto aparece la cabecera de Explorar (sin esperar a que cargue la
+            // cuadrícula) y mantenerla puesta mientras sigas ahí sin escribir: sin parpadeos
+            if (!typing && (grid || bar != null || curtain.mode() == Curtain.EXPLORE)) {
                 int top = topLimit(win);
-                AccessibilityNodeInfo bar = visible(root, "explore_action_bar");
                 if (bar != null) top = Math.max(top, boundsOf(bar).bottom);
+                else if (field != null) top = Math.max(top, boundsOf(field).bottom);
                 showCurtain(Curtain.EXPLORE, new Rect(win.left, top, win.right, bottom));
                 return;
             }
@@ -402,6 +470,13 @@ public class BlockerService extends AccessibilityService
         // Ni Inicio ni Explorar (historias, mensajes, otra pestaña…): quitarla al instante
         curtain.hide();
         softHideSince = 0;
+    }
+
+    /** El buscador tiene texto escrito (no solo el texto de ayuda «Buscar»). */
+    private static boolean hasTypedText(AccessibilityNodeInfo field) {
+        CharSequence t = field.getText();
+        if (t == null || t.length() == 0) return false;
+        return !(android.os.Build.VERSION.SDK_INT >= 26 && field.isShowingHintText());
     }
 
     private void showCurtain(int mode, Rect r) {
@@ -453,8 +528,78 @@ public class BlockerService extends AccessibilityService
     /** Tocaste fuera de la cortina: quitarla en ese mismo instante y comprobar poco después. */
     @Override
     public void onOutsideTouch() {
+        // No quitar la cortina por un toque: solo si Instagram cambia de pantalla de verdad
         settleRuns = 0;
-        pauseCurtain(400);
+        outsideWatchUntil = SystemClock.uptimeMillis() + OUTSIDE_WATCH;
+        handler.removeCallbacks(outsideTick);
+        handler.post(outsideTick);
+    }
+
+    /**
+     * Comprobación rápida tras un toque fuera de la cortina. scan() quita la cortina si ya
+     * no estás en el inicio o en Explorar (historia, mensajes, otra pestaña, menú del logo)
+     * y la deja quieta si nada ha cambiado (toque accidental, deslizar las historias).
+     */
+    private void outsideCheck() {
+        handler.removeCallbacks(outsideTick);
+        if (curtain.mode() == Curtain.NONE) return;
+        if (launcherVisible()) {
+            curtain.hide();
+            return;
+        }
+        scan();
+        if (curtain.mode() != Curtain.NONE && SystemClock.uptimeMillis() < outsideWatchUntil) {
+            handler.postDelayed(outsideTick, OUTSIDE_TICK);
+        }
+    }
+
+    /**
+     * Deslizaste horizontalmente sobre la cortina del inicio: repetir ese mismo gesto
+     * en Instagram (mensajes a un lado, cámara al otro). El scroll vertical sigue bloqueado.
+     */
+    @Override
+    public void onHorizontalSwipe(float x0, float y0, float x1, float y1, long durationMs) {
+        if (curtain.mode() != Curtain.HOME_FEED || android.os.Build.VERSION.SDK_INT < 24) return;
+        curtain.setPassThrough(true);
+        final long d = Math.max(120, Math.min(350, durationMs));
+        final android.graphics.Path path = new android.graphics.Path();
+        path.moveTo(x0, y0);
+        path.lineTo(x1, y1);
+        // Un instante para que Android aplique el «dejar pasar toques» antes de enviar el gesto
+        handler.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    dispatchGesture(new android.accessibilityservice.GestureDescription.Builder()
+                            .addStroke(new android.accessibilityservice.GestureDescription.StrokeDescription(path, 0, d))
+                            .build(), null, null);
+                } catch (Exception ignored) {
+                }
+            }
+        }, 40);
+        handler.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                curtain.setPassThrough(false);
+                settleRuns = 0;
+                outsideWatchUntil = SystemClock.uptimeMillis() + OUTSIDE_WATCH;
+                outsideCheck();
+            }
+        }, d + 160);
+    }
+
+    /** ¿Se ve el escritorio o la vista de apps recientes? (gesto de salir de Instagram) */
+    private boolean launcherVisible() {
+        if (launcherPkgs.isEmpty()) return false;
+        try {
+            for (AccessibilityWindowInfo w : getWindows()) {
+                if (w.getType() != AccessibilityWindowInfo.TYPE_APPLICATION) continue;
+                AccessibilityNodeInfo r = w.getRoot();
+                if (r != null && r.getPackageName() != null && launcherPkgs.contains(r.getPackageName().toString())) return true;
+            }
+        } catch (Exception ignored) {
+        }
+        return false;
     }
 
     private static boolean isHomeTabClick(AccessibilityEvent event) {
