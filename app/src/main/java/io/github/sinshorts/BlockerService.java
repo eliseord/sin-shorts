@@ -85,12 +85,13 @@ public class BlockerService extends AccessibilityService
     private long igEnteredAt;
     private String foregroundPkg = "";
     private long lastAnchorFix;
+    private int anchorSteps;
     private long overlaysFrozenUntil;
     private int trayMarkX = Integer.MIN_VALUE; // posición de la primera historia al tocar la fila
     private int restHeaderTop = -1;          // posición de la cabecera con el feed arriba del todo
     private long lastScrollScan;
     private boolean sawScrollSinceTouch;     // tras tocar la fila de historias, ¿empezaste a deslizar?
-    private static final long STORY_GUESS = 300, WATCHDOG = 1500;
+    private static final long STORY_GUESS = 180, WATCHDOG = 1500;
 
     /** Tocaste fuera de la cortina y no deslizaste: era un toque en una historia. */
     private final Runnable storyGuess = new Runnable() {
@@ -231,13 +232,12 @@ public class BlockerService extends AccessibilityService
             settleRuns = 0;
             if (event.getEventType() == AccessibilityEvent.TYPE_VIEW_SCROLLED && curtain.mode() == Curtain.HOME_FEED) {
                 sawScrollSinceTouch = true;
-                // El feed se mueve: comprobar el ancla en el acto (como mucho cada 80 ms)
+                // Algo se ha desplazado: si es el feed (no la fila de historias), devolverlo arriba
                 long now = SystemClock.uptimeMillis();
                 if (now - lastScrollScan > 80) {
                     lastScrollScan = now;
-                    handler.removeCallbacks(scanTask);
-                    scanPending = true;
-                    handler.post(scanTask);
+                    handler.removeCallbacks(anchorTask);
+                    handler.post(anchorTask);
                 }
             }
             // Justo después de un toque fuera: comprobar en el acto, sin esperas
@@ -504,30 +504,15 @@ public class BlockerService extends AccessibilityService
             AccessibilityNodeInfo stories = visible(root, "reels_tray_container");
             boolean feedVisible = header != null || stories != null || visible(root, "row_feed_profile_header") != null;
             if (feedVisible) {
-                // Ancla: recordar dónde está la cabecera con el feed arriba del todo y, en cuanto
-                // el feed se desplace aunque sea un poco, tocar «Inicio» para volver arriba
-                int headerTop = header != null ? boundsOf(header).top : Integer.MIN_VALUE;
-                if (header != null && headerTop > restHeaderTop) restHeaderTop = headerTop;
-                boolean moved = restHeaderTop >= 0 && (header == null || headerTop < restHeaderTop - dp(10));
-                if (moved && curtain.mode() == Curtain.HOME_FEED) {
-                    long now = SystemClock.uptimeMillis();
-                    AccessibilityNodeInfo homeTab = visible(root, "feed_tab");
-                    if (homeTab != null && now - lastAnchorFix > 400) {
-                        lastAnchorFix = now;
-                        click(homeTab);
-                    }
-                }
                 int top = topLimit(win);
                 if (header != null) top = Math.max(top, boundsOf(header).bottom);
                 if (stories != null) top = Math.max(top, boundsOf(stories).bottom);
                 if (showCurtain(Curtain.HOME_FEED, new Rect(win.left, top, win.right, bottom))) {
-                    List<Rect> guards = new ArrayList<Rect>();
-                    if (header != null) guards.add(boundsOf(header));
-                    AccessibilityNodeInfo homeTab = visible(root, "feed_tab");
-                    if (homeTab != null) guards.add(boundsOf(homeTab));
+                    // Solo las pestañas de abajo llevan zona de salida instantánea. La cabecera
+                    // (+, corazón, mensajes, logo) queda libre: un toque y entras
                     if (SystemClock.uptimeMillis() >= overlaysFrozenUntil) {
-                        curtain.setGuards(guards);
-                        curtain.setHotspots(exitButtons(root, header));
+                        curtain.removeGuards();
+                        curtain.setHotspots(exitButtons(root, null));
                     }
                 }
                 return;
@@ -761,6 +746,57 @@ public class BlockerService extends AccessibilityService
                     .build(), null, null);
         } catch (Exception ignored) {
         }
+    }
+
+    /**
+     * Ancla sin recargar: si el feed del inicio puede desplazarse hacia arriba (es decir, no
+     * está arriba del todo), lo desplaza hacia arriba como haría tu dedo. Tocar «Inicio» lo
+     * hacía recargar, y eso es lo que provocaba las recargas continuas.
+     */
+    private final Runnable anchorTask = new Runnable() {
+        @Override
+        public void run() {
+            if (curtain.mode() != Curtain.HOME_FEED) return;
+            AccessibilityNodeInfo root = getRootInActiveWindow();
+            if (root == null) return;
+            AccessibilityNodeInfo list = feedList(root);
+            if (list != null && canScrollBack(list) && anchorSteps < 4) {
+                anchorSteps++;
+                list.performAction(AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD);
+                // por si hace falta más de un paso (como mucho 4)
+                handler.postDelayed(this, 250);
+            } else {
+                anchorSteps = 0;
+            }
+        }
+    };
+
+    /** La lista vertical del feed: primer antepasado desplazable y alto de las historias o de un post. */
+    private AccessibilityNodeInfo feedList(AccessibilityNodeInfo root) {
+        Rect w = boundsOf(root);
+        for (String id : new String[]{"reels_tray_container", "row_feed_profile_header"}) {
+            List<AccessibilityNodeInfo> nodes = root.findAccessibilityNodeInfosByViewId(IG_ID + id);
+            if (nodes == null || nodes.isEmpty()) continue;
+            AccessibilityNodeInfo cur = nodes.get(0).getParent();
+            for (int i = 0; i < 8 && cur != null; i++) {
+                String vid = cur.getViewIdResourceName();
+                CharSequence cls = cur.getClassName();
+                // Nunca el carrusel horizontal de pantallas (cámara / inicio / mensajes)
+                boolean pager = (vid != null && vid.toLowerCase(Locale.ROOT).contains("pager"))
+                        || (cls != null && cls.toString().contains("ViewPager"));
+                if (pager) return null;
+                if (cur.isScrollable() && boundsOf(cur).height() > w.height() * 0.4f) return cur;
+                cur = cur.getParent();
+            }
+        }
+        return null;
+    }
+
+    private static boolean canScrollBack(AccessibilityNodeInfo n) {
+        for (AccessibilityNodeInfo.AccessibilityAction a : n.getActionList()) {
+            if (a.getId() == AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD) return true;
+        }
+        return false;
     }
 
     /** Posición horizontal del primer elemento visible de la fila de historias. */
