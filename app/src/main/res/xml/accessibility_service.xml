@@ -5,6 +5,6 @@
     android:accessibilityFlags="flagReportViewIds|flagIncludeNotImportantViews|flagRetrieveInteractiveWindows"
     android:canRetrieveWindowContent="true"
     android:canPerformGestures="true"
-    android:notificationTimeout="100"
+    android:notificationTimeout="50"
     android:settingsActivity="io.github.sinshorts.MainActivity"
     android:description="@string/service_description" />

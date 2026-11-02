@@ -85,6 +85,28 @@ public class BlockerService extends AccessibilityService
     private long igEnteredAt;
     private String foregroundPkg = "";
     private long lastAnchorFix;
+    private int restHeaderTop = -1;          // posición de la cabecera con el feed arriba del todo
+    private long lastScrollScan;
+    private boolean sawScrollSinceTouch;     // tras tocar la fila de historias, ¿empezaste a deslizar?
+    private static final long STORY_GUESS = 220, WATCHDOG = 1500;
+
+    /** Tocaste fuera de la cortina y no deslizaste: era un toque en una historia. */
+    private final Runnable storyGuess = new Runnable() {
+        @Override
+        public void run() {
+            if (!sawScrollSinceTouch && curtain.mode() == Curtain.HOME_FEED) pauseCurtain(700);
+        }
+    };
+
+    /** Mientras Instagram está delante, comprobar de vez en cuando que la cortina sigue donde debe. */
+    private final Runnable watchdog = new Runnable() {
+        @Override
+        public void run() {
+            if (!IG.equals(foregroundPkg) || !enabled) return;
+            if (curtain.mode() == Curtain.NONE && SystemClock.uptimeMillis() >= curtainPausedUntil) scan();
+            handler.postDelayed(this, WATCHDOG);
+        }
+    };
 
     /** Tras un toque fuera de la cortina: vigilar Instagram muy seguido durante un instante. */
     private static final long OUTSIDE_WATCH = 700, OUTSIDE_TICK = 50;
@@ -171,14 +193,21 @@ public class BlockerService extends AccessibilityService
         String pkg = event.getPackageName().toString();
 
         if (event.getEventType() == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED && !isTransient(pkg)) {
-            if (pkg.equals(IG) && !IG.equals(foregroundPkg)) igEnteredAt = SystemClock.uptimeMillis();
+            if (pkg.equals(IG) && !IG.equals(foregroundPkg)) {
+                igEnteredAt = SystemClock.uptimeMillis();
+                handler.removeCallbacks(watchdog);
+                handler.postDelayed(watchdog, WATCHDOG);
+            }
+            if (!pkg.equals(IG)) restHeaderTop = -1;
             foregroundPkg = pkg;
         }
 
-        // Si cambias a otra app (o bajas las notificaciones), quitar la cortina
+        // Si cambias a otra app, quitar la cortina. Las notificaciones emergentes y el teclado
+        // no cuentan (por eso desaparecía estando quieto); bajar la persiana de notificaciones
+        // empieza con un toque fuera de la cortina, que ya la retira
         if (curtain != null && curtain.mode() != Curtain.NONE
                 && event.getEventType() == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
-                && !pkg.equals(IG) && !pkg.equals(getPackageName())) {
+                && !pkg.equals(IG) && !isTransient(pkg)) {
             curtain.hide();
         }
 
@@ -194,6 +223,17 @@ public class BlockerService extends AccessibilityService
 
         if (pkg.equals(IG)) {
             settleRuns = 0;
+            if (event.getEventType() == AccessibilityEvent.TYPE_VIEW_SCROLLED && curtain.mode() == Curtain.HOME_FEED) {
+                sawScrollSinceTouch = true;
+                // El feed se mueve: comprobar el ancla en el acto (como mucho cada 80 ms)
+                long now = SystemClock.uptimeMillis();
+                if (now - lastScrollScan > 80) {
+                    lastScrollScan = now;
+                    handler.removeCallbacks(scanTask);
+                    scanPending = true;
+                    handler.post(scanTask);
+                }
+            }
             // Justo después de un toque fuera: comprobar en el acto, sin esperas
             if (SystemClock.uptimeMillis() < outsideWatchUntil) {
                 handler.removeCallbacks(outsideTick);
@@ -253,6 +293,8 @@ public class BlockerService extends AccessibilityService
                 return;
             }
             if (!watched.contains(pkg)) {
+                // Una notificación o el teclado por encima de Instagram: no es salir de la app
+                if (IG.equals(foregroundPkg) && isTransient(pkg)) return;
                 // Puede ser un instante de una animación: confirmar antes de quitarla
                 if (!pkg.equals(getPackageName())) softHide();
                 return;
@@ -456,12 +498,15 @@ public class BlockerService extends AccessibilityService
             AccessibilityNodeInfo stories = visible(root, "reels_tray_container");
             boolean feedVisible = header != null || stories != null || visible(root, "row_feed_profile_header") != null;
             if (feedVisible) {
-                // Ancla: si el feed se ha desplazado y ya no se ven ni cabecera ni historias,
-                // tocar «Inicio» para volver arriba (así siempre puedes volver a subir)
-                if (header == null && stories == null && curtain.mode() == Curtain.HOME_FEED) {
+                // Ancla: recordar dónde está la cabecera con el feed arriba del todo y, en cuanto
+                // el feed se desplace aunque sea un poco, tocar «Inicio» para volver arriba
+                int headerTop = header != null ? boundsOf(header).top : Integer.MIN_VALUE;
+                if (header != null && headerTop > restHeaderTop) restHeaderTop = headerTop;
+                boolean moved = restHeaderTop >= 0 && (header == null || headerTop < restHeaderTop - dp(10));
+                if (moved && curtain.mode() == Curtain.HOME_FEED) {
                     long now = SystemClock.uptimeMillis();
                     AccessibilityNodeInfo homeTab = visible(root, "feed_tab");
-                    if (homeTab != null && now - lastAnchorFix > 1000) {
+                    if (homeTab != null && now - lastAnchorFix > 400) {
                         lastAnchorFix = now;
                         click(homeTab);
                     }
@@ -470,6 +515,11 @@ public class BlockerService extends AccessibilityService
                 if (header != null) top = Math.max(top, boundsOf(header).bottom);
                 if (stories != null) top = Math.max(top, boundsOf(stories).bottom);
                 if (showCurtain(Curtain.HOME_FEED, new Rect(win.left, top, win.right, bottom))) {
+                    List<Rect> guards = new ArrayList<Rect>();
+                    if (header != null) guards.add(boundsOf(header));
+                    AccessibilityNodeInfo homeTab = visible(root, "feed_tab");
+                    if (homeTab != null) guards.add(boundsOf(homeTab));
+                    curtain.setGuards(guards);
                     curtain.setHotspots(exitButtons(root, header));
                 }
                 return;
@@ -638,6 +688,13 @@ public class BlockerService extends AccessibilityService
         outsideWatchUntil = SystemClock.uptimeMillis() + OUTSIDE_WATCH;
         handler.removeCallbacks(outsideTick);
         handler.post(outsideTick);
+        // En el inicio, lo único sin tapar es la fila de historias: si no empiezas a deslizar
+        // enseguida, has tocado una historia → quitar la cortina sin esperar al visor
+        if (curtain.mode() == Curtain.HOME_FEED) {
+            sawScrollSinceTouch = false;
+            handler.removeCallbacks(storyGuess);
+            handler.postDelayed(storyGuess, STORY_GUESS);
+        }
     }
 
     /**
@@ -658,39 +715,32 @@ public class BlockerService extends AccessibilityService
         }
     }
 
-    /**
-     * Deslizaste horizontalmente sobre la cortina del inicio: repetir ese mismo gesto
-     * en Instagram (mensajes a un lado, cámara al otro). El scroll vertical sigue bloqueado.
-     */
+    /** Toque sobre la cabecera o «Inicio»: repetirlo en Instagram sin quitar la cortina. */
     @Override
-    public void onHorizontalSwipe(float x0, float y0, float x1, float y1, long durationMs) {
-        if (curtain.mode() != Curtain.HOME_FEED || android.os.Build.VERSION.SDK_INT < 24) return;
-        curtain.setPassThrough(true);
-        final long d = Math.max(120, Math.min(350, durationMs));
-        final android.graphics.Path path = new android.graphics.Path();
-        path.moveTo(x0, y0);
-        path.lineTo(x1, y1);
-        // Un instante para que Android aplique el «dejar pasar toques» antes de enviar el gesto
+    public void onGuardTap(final float x, final float y, long pressMs) {
+        curtain.removeGuards();
+        final long d = Math.max(40, Math.min(1000, pressMs));
         handler.postDelayed(new Runnable() {
             @Override
             public void run() {
-                try {
-                    dispatchGesture(new android.accessibilityservice.GestureDescription.Builder()
-                            .addStroke(new android.accessibilityservice.GestureDescription.StrokeDescription(path, 0, d))
-                            .build(), null, null);
-                } catch (Exception ignored) {
-                }
+                tapAt(x, y, d);
             }
-        }, 40);
-        handler.postDelayed(new Runnable() {
-            @Override
-            public void run() {
-                curtain.setPassThrough(false);
-                settleRuns = 0;
-                outsideWatchUntil = SystemClock.uptimeMillis() + OUTSIDE_WATCH;
-                outsideCheck();
-            }
-        }, d + 160);
+        }, 30);
+        // Volver a poner las zonas protegidas cuando Instagram haya respondido al toque
+        handler.removeCallbacks(scanTask);
+        scanPending = true;
+        handler.postDelayed(scanTask, d + 300);
+    }
+
+    private void tapAt(float x, float y, long d) {
+        try {
+            android.graphics.Path path = new android.graphics.Path();
+            path.moveTo(x, y);
+            dispatchGesture(new android.accessibilityservice.GestureDescription.Builder()
+                    .addStroke(new android.accessibilityservice.GestureDescription.StrokeDescription(path, 0, d))
+                    .build(), null, null);
+        } catch (Exception ignored) {
+        }
     }
 
     /** ¿Se ve el escritorio o la vista de apps recientes? (gesto de salir de Instagram) */

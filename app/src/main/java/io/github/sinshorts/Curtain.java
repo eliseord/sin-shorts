@@ -32,8 +32,8 @@ final class Curtain {
         /** Has tocado la pantalla fuera de la cortina (historias, mensajes, pestañas…). */
         void onOutsideTouch();
 
-        /** Has deslizado horizontalmente sobre la cortina (coordenadas de pantalla). */
-        void onHorizontalSwipe(float x0, float y0, float x1, float y1, long durationMs);
+        /** Toque (sin deslizar) sobre una zona protegida: repetirlo en Instagram sin quitar la cortina. */
+        void onGuardTap(float x, float y, long pressMs);
 
         /** Has puesto el dedo sobre un botón de Instagram que saca del inicio (perfil, mensajes…). */
         void onHotspotDown();
@@ -54,6 +54,9 @@ final class Curtain {
     private final java.util.List<View> hotspotViews = new java.util.ArrayList<View>();
     private final java.util.List<Rect> hotspotRects = new java.util.ArrayList<Rect>();
     private boolean hotspotTouchActive;
+
+    private final java.util.List<View> guardViews = new java.util.ArrayList<View>();
+    private final java.util.List<Rect> guardRects = new java.util.ArrayList<Rect>();
     private final Rect bounds = new Rect();
 
     Curtain(AccessibilityService service, Actions actions) {
@@ -102,6 +105,79 @@ final class Curtain {
         }
     }
 
+    /**
+     * Zonas protegidas sobre la cabecera y la pestaña «Inicio»: un toque se repite en
+     * Instagram (el logo sigue abriendo su menú), pero los deslizamientos se bloquean,
+     * así que desde ahí no se puede arrastrar el feed ni saltar a Reels.
+     */
+    void setGuards(java.util.List<Rect> rects) {
+        if (hotspotTouchActive) return;
+        if (rects.equals(guardRects)) return;
+        removeGuards();
+        removeHotspots(); // se vuelven a poner encima de las zonas protegidas
+        for (Rect r : rects) {
+            if (r.width() <= 0 || r.height() <= 0) continue;
+            View v = new View(service);
+            v.setOnTouchListener(new View.OnTouchListener() {
+                float x0, y0;
+                long t0;
+
+                @Override
+                public boolean onTouch(View view, android.view.MotionEvent e) {
+                    switch (e.getActionMasked()) {
+                        case android.view.MotionEvent.ACTION_DOWN:
+                            x0 = e.getRawX();
+                            y0 = e.getRawY();
+                            t0 = e.getEventTime();
+                            return true;
+                        case android.view.MotionEvent.ACTION_UP:
+                            if (Math.abs(e.getRawX() - x0) < dp(14) && Math.abs(e.getRawY() - y0) < dp(14)) {
+                                actions.onGuardTap(x0, y0, e.getEventTime() - t0);
+                            }
+                            return true;
+                        default:
+                            return true;
+                    }
+                }
+            });
+            try {
+                wm.addView(v, overlayParams(r));
+                guardViews.add(v);
+                guardRects.add(new Rect(r));
+            } catch (Exception ignored) {
+            }
+        }
+    }
+
+    void removeGuards() {
+        for (View v : guardViews) {
+            try {
+                wm.removeView(v);
+            } catch (Exception ignored) {
+            }
+        }
+        guardViews.clear();
+        guardRects.clear();
+    }
+
+    private WindowManager.LayoutParams overlayParams(Rect r) {
+        WindowManager.LayoutParams p = new WindowManager.LayoutParams(r.width(), r.height(),
+                WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                        | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                PixelFormat.TRANSPARENT);
+        p.gravity = Gravity.TOP | Gravity.LEFT;
+        p.x = r.left;
+        p.y = r.top;
+        try {
+            WindowManager.LayoutParams.class.getField("layoutInDisplayCutoutMode").setInt(p, 3);
+        } catch (Exception ignored) {
+        }
+        return p;
+    }
+
     /** Coloca (o recoloca) las zonas táctiles. No hace nada si no han cambiado. */
     void setHotspots(java.util.List<Rect> rects) {
         if (hotspotTouchActive) return; // no tocar mientras tienes el dedo encima
@@ -134,22 +210,8 @@ final class Curtain {
                     }
                 }
             });
-            WindowManager.LayoutParams p = new WindowManager.LayoutParams(r.width(), r.height(),
-                    WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-                            | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
-                            | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
-                            | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
-                    PixelFormat.TRANSPARENT);
-            p.gravity = Gravity.TOP | Gravity.LEFT;
-            p.x = r.left;
-            p.y = r.top;
             try {
-                WindowManager.LayoutParams.class.getField("layoutInDisplayCutoutMode").setInt(p, 3);
-            } catch (Exception ignored) {
-            }
-            try {
-                wm.addView(v, p);
+                wm.addView(v, overlayParams(r));
                 hotspotViews.add(v);
                 hotspotRects.add(new Rect(r));
             } catch (Exception ignored) {
@@ -172,6 +234,7 @@ final class Curtain {
     /** Quita solo la cortina visible; las zonas táctiles siguen hasta que levantes el dedo. */
     void hideKeepingHotspots() {
         boolean keep = hotspotTouchActive;
+        removeGuards();
         if (view != null) {
             try {
                 wm.removeView(view);
@@ -186,6 +249,7 @@ final class Curtain {
     }
 
     void hide() {
+        removeGuards();
         removeHotspots();
         passThrough = false;
         if (view != null) {
@@ -243,32 +307,14 @@ final class Curtain {
         box.setPadding(dp(28), dp(16), dp(28), dp(16));
         // Consumir los toques: así el feed de debajo no se puede deslizar
         box.setClickable(true);
-        final boolean homeMode = m == HOME_FEED;
         box.setOnTouchListener(new View.OnTouchListener() {
-            float x0, y0;
-            long t0;
-
             @Override
             public boolean onTouch(View v, android.view.MotionEvent e) {
-                switch (e.getActionMasked()) {
-                    case android.view.MotionEvent.ACTION_OUTSIDE:
-                        actions.onOutsideTouch();
-                        return true;
-                    case android.view.MotionEvent.ACTION_DOWN:
-                        x0 = e.getRawX();
-                        y0 = e.getRawY();
-                        t0 = e.getEventTime();
-                        return true;
-                    case android.view.MotionEvent.ACTION_UP:
-                        float dx = e.getRawX() - x0, dy = e.getRawY() - y0;
-                        // Deslizamiento claramente horizontal: pasárselo a Instagram
-                        if (homeMode && Math.abs(dx) > dp(48) && Math.abs(dx) > 1.5f * Math.abs(dy)) {
-                            actions.onHorizontalSwipe(x0, y0, e.getRawX(), y0, e.getEventTime() - t0);
-                        }
-                        return true;
-                    default:
-                        return true;
+                if (e.getActionMasked() == android.view.MotionEvent.ACTION_OUTSIDE) {
+                    actions.onOutsideTouch();
                 }
+                // Todo lo demás (scroll, deslizamientos) se absorbe: el feed de debajo no se mueve
+                return true;
             }
         });
 
