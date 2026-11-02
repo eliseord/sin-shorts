@@ -78,6 +78,17 @@ public class BlockerService extends AccessibilityService
 
     private long lastDiag;
     private final Set<String> ignoredForDiag = new HashSet<String>();
+    private final Set<String> launcherPkgs = new HashSet<String>();
+
+    /** Tras un toque fuera de la cortina: vigilar Instagram muy seguido durante un instante. */
+    private static final long OUTSIDE_WATCH = 700, OUTSIDE_TICK = 50;
+    private long outsideWatchUntil;
+    private final Runnable outsideTick = new Runnable() {
+        @Override
+        public void run() {
+            outsideCheck();
+        }
+    };
 
     /** Tras un cambio en Instagram, volver a mirar unas veces aunque no lleguen más eventos. */
     private int settleRuns;
@@ -112,6 +123,7 @@ public class BlockerService extends AccessibilityService
             Intent home = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME);
             for (ResolveInfo ri : getPackageManager().queryIntentActivities(home, 0)) {
                 ignoredForDiag.add(ri.activityInfo.packageName);
+                launcherPkgs.add(ri.activityInfo.packageName);
             }
         } catch (Exception ignored) {
         }
@@ -143,7 +155,13 @@ public class BlockerService extends AccessibilityService
 
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {
-        if (event == null || event.getPackageName() == null) return;
+        if (event == null) return;
+        // La lista de ventanas cambió: si aparece el escritorio (gesto de salir), quitar la cortina ya
+        if (event.getEventType() == AccessibilityEvent.TYPE_WINDOWS_CHANGED) {
+            if (curtain != null && curtain.mode() != Curtain.NONE && launcherVisible()) curtain.hide();
+            return;
+        }
+        if (event.getPackageName() == null) return;
         String pkg = event.getPackageName().toString();
 
         // Si cambias a otra app (o bajas las notificaciones), quitar la cortina
@@ -165,6 +183,11 @@ public class BlockerService extends AccessibilityService
 
         if (pkg.equals(IG)) {
             settleRuns = 0;
+            // Justo después de un toque fuera: comprobar en el acto, sin esperas
+            if (SystemClock.uptimeMillis() < outsideWatchUntil) {
+                handler.removeCallbacks(outsideTick);
+                handler.post(outsideTick);
+            }
             if (event.getEventType() == AccessibilityEvent.TYPE_VIEW_CLICKED && curtain.mode() != Curtain.NONE) {
                 handler.removeCallbacks(scanTask);
                 scanPending = true;
@@ -453,8 +476,43 @@ public class BlockerService extends AccessibilityService
     /** Tocaste fuera de la cortina: quitarla en ese mismo instante y comprobar poco después. */
     @Override
     public void onOutsideTouch() {
+        // No quitar la cortina por un toque: solo si Instagram cambia de pantalla de verdad
         settleRuns = 0;
-        pauseCurtain(400);
+        outsideWatchUntil = SystemClock.uptimeMillis() + OUTSIDE_WATCH;
+        handler.removeCallbacks(outsideTick);
+        handler.post(outsideTick);
+    }
+
+    /**
+     * Comprobación rápida tras un toque fuera de la cortina. scan() quita la cortina si ya
+     * no estás en el inicio o en Explorar (historia, mensajes, otra pestaña, menú del logo)
+     * y la deja quieta si nada ha cambiado (toque accidental, deslizar las historias).
+     */
+    private void outsideCheck() {
+        handler.removeCallbacks(outsideTick);
+        if (curtain.mode() == Curtain.NONE) return;
+        if (launcherVisible()) {
+            curtain.hide();
+            return;
+        }
+        scan();
+        if (curtain.mode() != Curtain.NONE && SystemClock.uptimeMillis() < outsideWatchUntil) {
+            handler.postDelayed(outsideTick, OUTSIDE_TICK);
+        }
+    }
+
+    /** ¿Se ve el escritorio o la vista de apps recientes? (gesto de salir de Instagram) */
+    private boolean launcherVisible() {
+        if (launcherPkgs.isEmpty()) return false;
+        try {
+            for (AccessibilityWindowInfo w : getWindows()) {
+                if (w.getType() != AccessibilityWindowInfo.TYPE_APPLICATION) continue;
+                AccessibilityNodeInfo r = w.getRoot();
+                if (r != null && r.getPackageName() != null && launcherPkgs.contains(r.getPackageName().toString())) return true;
+            }
+        } catch (Exception ignored) {
+        }
+        return false;
     }
 
     private static boolean isHomeTabClick(AccessibilityEvent event) {
