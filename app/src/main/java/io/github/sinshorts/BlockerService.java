@@ -621,19 +621,20 @@ public class BlockerService extends AccessibilityService
         curtain.removeGuards();
         final long d = Math.max(40, Math.min(1500, pressMs));
         overlaysFrozenUntil = SystemClock.uptimeMillis() + d + 350;
-        handler.postDelayed(new Runnable() {
-            @Override
-            public void run() {
-                try {
-                    android.graphics.Path path = new android.graphics.Path();
-                    path.moveTo(x, y);
-                    dispatchGesture(new android.accessibilityservice.GestureDescription.Builder()
-                            .addStroke(new android.accessibilityservice.GestureDescription.StrokeDescription(path, 0, d))
-                            .build(), null, null);
-                } catch (Exception ignored) {
+        // Pulsar directamente la pestaña que hay bajo el dedo (el toque repetido con un
+        // dedo virtual a veces se perdía y había que tocar dos veces)
+        boolean longPress = pressMs >= 500;
+        AccessibilityNodeInfo node = nodeAt(x, y, longPress);
+        boolean done = node != null && node.performAction(longPress
+                ? AccessibilityNodeInfo.ACTION_LONG_CLICK : AccessibilityNodeInfo.ACTION_CLICK);
+        if (!done) {
+            handler.postDelayed(new Runnable() {
+                @Override
+                public void run() {
+                    tapAt(x, y, d);
                 }
-            }
-        }, 30);
+            }, 40);
+        }
         // La cortina no vuelve hasta que Instagram haya cambiado de pantalla
         curtainPausedUntil = SystemClock.uptimeMillis() + d + 450;
         handler.removeCallbacks(scanTask);
