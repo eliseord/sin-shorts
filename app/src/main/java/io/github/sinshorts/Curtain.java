@@ -34,6 +34,12 @@ final class Curtain {
 
         /** Has deslizado horizontalmente sobre la cortina (coordenadas de pantalla). */
         void onHorizontalSwipe(float x0, float y0, float x1, float y1, long durationMs);
+
+        /** Has puesto el dedo sobre un botón de Instagram que saca del inicio (perfil, mensajes…). */
+        void onHotspotDown();
+
+        /** Has levantado el dedo de ese botón: repetir el toque en Instagram. */
+        void onHotspotUp(float x, float y, long pressMs);
     }
 
     private final AccessibilityService service;
@@ -43,6 +49,11 @@ final class Curtain {
     private View view;
     private int mode = NONE;
     private boolean passThrough;
+
+    // Zonas invisibles sobre los botones que sacan del inicio (pestañas, iconos de la cabecera)
+    private final java.util.List<View> hotspotViews = new java.util.ArrayList<View>();
+    private final java.util.List<Rect> hotspotRects = new java.util.ArrayList<Rect>();
+    private boolean hotspotTouchActive;
     private final Rect bounds = new Rect();
 
     Curtain(AccessibilityService service, Actions actions) {
@@ -91,7 +102,91 @@ final class Curtain {
         }
     }
 
+    /** Coloca (o recoloca) las zonas táctiles. No hace nada si no han cambiado. */
+    void setHotspots(java.util.List<Rect> rects) {
+        if (hotspotTouchActive) return; // no tocar mientras tienes el dedo encima
+        if (rects.equals(hotspotRects)) return;
+        removeHotspots();
+        for (Rect r : rects) {
+            if (r.width() <= 0 || r.height() <= 0) continue;
+            View v = new View(service);
+            v.setOnTouchListener(new View.OnTouchListener() {
+                long t0;
+
+                @Override
+                public boolean onTouch(View view, android.view.MotionEvent e) {
+                    switch (e.getActionMasked()) {
+                        case android.view.MotionEvent.ACTION_DOWN:
+                            t0 = e.getEventTime();
+                            hotspotTouchActive = true;
+                            actions.onHotspotDown();
+                            return true;
+                        case android.view.MotionEvent.ACTION_UP:
+                            hotspotTouchActive = false;
+                            actions.onHotspotUp(e.getRawX(), e.getRawY(), e.getEventTime() - t0);
+                            return true;
+                        case android.view.MotionEvent.ACTION_CANCEL:
+                            hotspotTouchActive = false;
+                            removeHotspots();
+                            return true;
+                        default:
+                            return true;
+                    }
+                }
+            });
+            WindowManager.LayoutParams p = new WindowManager.LayoutParams(r.width(), r.height(),
+                    WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                            | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+                            | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+                            | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                    PixelFormat.TRANSPARENT);
+            p.gravity = Gravity.TOP | Gravity.LEFT;
+            p.x = r.left;
+            p.y = r.top;
+            try {
+                WindowManager.LayoutParams.class.getField("layoutInDisplayCutoutMode").setInt(p, 3);
+            } catch (Exception ignored) {
+            }
+            try {
+                wm.addView(v, p);
+                hotspotViews.add(v);
+                hotspotRects.add(new Rect(r));
+            } catch (Exception ignored) {
+            }
+        }
+    }
+
+    void removeHotspots() {
+        hotspotTouchActive = false;
+        for (View v : hotspotViews) {
+            try {
+                wm.removeView(v);
+            } catch (Exception ignored) {
+            }
+        }
+        hotspotViews.clear();
+        hotspotRects.clear();
+    }
+
+    /** Quita solo la cortina visible; las zonas táctiles siguen hasta que levantes el dedo. */
+    void hideKeepingHotspots() {
+        boolean keep = hotspotTouchActive;
+        if (view != null) {
+            try {
+                wm.removeView(view);
+            } catch (Exception ignored) {
+            }
+        }
+        view = null;
+        mode = NONE;
+        bounds.setEmpty();
+        passThrough = false;
+        if (!keep) removeHotspots();
+    }
+
     void hide() {
+        removeHotspots();
         passThrough = false;
         if (view != null) {
             try {

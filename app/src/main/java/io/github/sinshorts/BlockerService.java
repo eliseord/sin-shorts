@@ -80,6 +80,12 @@ public class BlockerService extends AccessibilityService
     private final Set<String> ignoredForDiag = new HashSet<String>();
     private final Set<String> launcherPkgs = new HashSet<String>();
 
+    /** Al volver a Instagram, esperar a que acabe su animación de apertura antes de tapar. */
+    private static final long ENTER_ANIMATION = 330;
+    private long igEnteredAt;
+    private String foregroundPkg = "";
+    private long lastAnchorFix;
+
     /** Tras un toque fuera de la cortina: vigilar Instagram muy seguido durante un instante. */
     private static final long OUTSIDE_WATCH = 700, OUTSIDE_TICK = 50;
     private long outsideWatchUntil;
@@ -163,6 +169,11 @@ public class BlockerService extends AccessibilityService
         }
         if (event.getPackageName() == null) return;
         String pkg = event.getPackageName().toString();
+
+        if (event.getEventType() == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED && !isTransient(pkg)) {
+            if (pkg.equals(IG) && !IG.equals(foregroundPkg)) igEnteredAt = SystemClock.uptimeMillis();
+            foregroundPkg = pkg;
+        }
 
         // Si cambias a otra app (o bajas las notificaciones), quitar la cortina
         if (curtain != null && curtain.mode() != Curtain.NONE
@@ -407,7 +418,8 @@ public class BlockerService extends AccessibilityService
 
     private void updateCurtainNow(AccessibilityNodeInfo root) {
         if (SystemClock.uptimeMillis() < curtainPausedUntil) {
-            curtain.hide();
+            // Si tienes el dedo sobre perfil/mensajes, conservar esa zona hasta que lo levantes
+            curtain.hideKeepingHotspots();
             return;
         }
         // Con el menú del logo abierto (Siguiendo / Favoritos), no taparlo
@@ -444,10 +456,22 @@ public class BlockerService extends AccessibilityService
             AccessibilityNodeInfo stories = visible(root, "reels_tray_container");
             boolean feedVisible = header != null || stories != null || visible(root, "row_feed_profile_header") != null;
             if (feedVisible) {
+                // Ancla: si el feed se ha desplazado y ya no se ven ni cabecera ni historias,
+                // tocar «Inicio» para volver arriba (así siempre puedes volver a subir)
+                if (header == null && stories == null && curtain.mode() == Curtain.HOME_FEED) {
+                    long now = SystemClock.uptimeMillis();
+                    AccessibilityNodeInfo homeTab = visible(root, "feed_tab");
+                    if (homeTab != null && now - lastAnchorFix > 1000) {
+                        lastAnchorFix = now;
+                        click(homeTab);
+                    }
+                }
                 int top = topLimit(win);
                 if (header != null) top = Math.max(top, boundsOf(header).bottom);
                 if (stories != null) top = Math.max(top, boundsOf(stories).bottom);
-                showCurtain(Curtain.HOME_FEED, new Rect(win.left, top, win.right, bottom));
+                if (showCurtain(Curtain.HOME_FEED, new Rect(win.left, top, win.right, bottom))) {
+                    curtain.setHotspots(exitButtons(root, header));
+                }
                 return;
             }
         }
@@ -479,13 +503,94 @@ public class BlockerService extends AccessibilityService
         return !(android.os.Build.VERSION.SDK_INT >= 26 && field.isShowingHintText());
     }
 
-    private void showCurtain(int mode, Rect r) {
+    private boolean showCurtain(int mode, Rect r) {
         if (r.height() < dp(120)) {
             curtain.hide();
-            return;
+            return false;
+        }
+        // Acabas de volver a Instagram: no tapar encima de su animación de zoom
+        long sinceEnter = SystemClock.uptimeMillis() - igEnteredAt;
+        if (curtain.mode() == Curtain.NONE && sinceEnter < ENTER_ANIMATION) {
+            handler.removeCallbacks(settleTask);
+            handler.postDelayed(settleTask, ENTER_ANIMATION - sinceEnter + 20);
+            return false;
         }
         softHideSince = 0;
         curtain.show(mode, r);
+        return true;
+    }
+
+    /** Pestañas de abajo (menos Inicio) e iconos de la cabecera (menos el logo). */
+    private List<Rect> exitButtons(AccessibilityNodeInfo root, AccessibilityNodeInfo header) {
+        List<Rect> out = new ArrayList<Rect>();
+        for (String id : new String[]{"search_tab", "clips_tab", "creation_tab", "direct_tab", "profile_tab"}) {
+            AccessibilityNodeInfo n = visible(root, id);
+            if (n != null) out.add(boundsOf(n));
+        }
+        if (header != null) {
+            Rect hb = boundsOf(header);
+            AccessibilityNodeInfo logo = findLogo(header);
+            Rect lb = logo != null ? boundsOf(logo) : new Rect();
+            ArrayDeque<AccessibilityNodeInfo> q = new ArrayDeque<AccessibilityNodeInfo>();
+            q.add(header);
+            int seen = 0;
+            while (!q.isEmpty() && seen < 120) {
+                AccessibilityNodeInfo n = q.poll();
+                seen++;
+                if (n != header && n.isClickable() && n.isVisibleToUser()) {
+                    Rect b = boundsOf(n);
+                    // botones pequeños de la cabecera (mensajes, notificaciones, crear), no el logo
+                    if (b.width() < hb.width() * 0.3f && !Rect.intersects(b, lb)) {
+                        out.add(b);
+                        continue;
+                    }
+                }
+                for (int i = 0; i < n.getChildCount(); i++) {
+                    AccessibilityNodeInfo ch = n.getChild(i);
+                    if (ch != null) q.add(ch);
+                }
+            }
+        }
+        return out;
+    }
+
+    /** Dedo sobre perfil, mensajes…: quitar la cortina en ese mismo instante. */
+    @Override
+    public void onHotspotDown() {
+        handler.removeCallbacks(settleTask);
+        curtainPausedUntil = Math.max(curtainPausedUntil, SystemClock.uptimeMillis() + 2000);
+        curtain.hideKeepingHotspots();
+    }
+
+    /** Dedo levantado: repetir el toque (con la misma duración) en Instagram. */
+    @Override
+    public void onHotspotUp(final float x, final float y, long pressMs) {
+        curtain.removeHotspots();
+        final long d = Math.max(40, Math.min(1500, pressMs));
+        handler.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    android.graphics.Path path = new android.graphics.Path();
+                    path.moveTo(x, y);
+                    dispatchGesture(new android.accessibilityservice.GestureDescription.Builder()
+                            .addStroke(new android.accessibilityservice.GestureDescription.StrokeDescription(path, 0, d))
+                            .build(), null, null);
+                } catch (Exception ignored) {
+                }
+            }
+        }, 30);
+        // La cortina no vuelve hasta que Instagram haya cambiado de pantalla
+        curtainPausedUntil = SystemClock.uptimeMillis() + d + 450;
+        handler.removeCallbacks(scanTask);
+        scanPending = true;
+        handler.postDelayed(scanTask, d + 550);
+    }
+
+    /** Paquetes que aparecen por encima sin que hayas cambiado de app. */
+    private boolean isTransient(String pkg) {
+        return pkg.equals(getPackageName()) || pkg.equals("com.android.systemui")
+                || pkg.contains("inputmethod") || pkg.contains("keyboard");
     }
 
     /**
