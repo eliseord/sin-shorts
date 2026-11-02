@@ -250,10 +250,8 @@ public class BlockerService extends AccessibilityService
                 if (clicked.endsWith(":id/search_tab")) {
                     // Entrar en Explorar: comprobar casi al instante para taparlo antes de que se vea
                     if (curtain.mode() == Curtain.HOME_FEED) curtain.hide();
-                    settleRuns = 0;
-                    handler.removeCallbacks(scanTask);
-                    scanPending = true;
-                    handler.postDelayed(scanTask, 40);
+                    curtainPausedUntil = 0;
+                    fastScans();
                     return;
                 }
                 if (curtain.mode() != Curtain.NONE) {
@@ -635,11 +633,32 @@ public class BlockerService extends AccessibilityService
                 }
             }, 40);
         }
+        String id = node != null ? node.getViewIdResourceName() : null;
+        if (id != null && id.endsWith(":id/search_tab")) {
+            // La lupa: aquí sí queremos la cortina de Explorar cuanto antes, sin pausa
+            curtainPausedUntil = 0;
+            overlaysFrozenUntil = 0;
+            fastScans();
+            return;
+        }
         // La cortina no vuelve hasta que Instagram haya cambiado de pantalla
         curtainPausedUntil = SystemClock.uptimeMillis() + d + 450;
         handler.removeCallbacks(scanTask);
         scanPending = true;
         handler.postDelayed(scanTask, d + 550);
+    }
+
+    /** Comprobar la pantalla varias veces seguidas (para tapar Explorar en cuanto aparece). */
+    private void fastScans() {
+        settleRuns = 0;
+        for (long t : new long[]{40, 100, 170, 260, 380}) {
+            handler.postDelayed(new Runnable() {
+                @Override
+                public void run() {
+                    scan();
+                }
+            }, t);
+        }
     }
 
     /** Paquetes que aparecen por encima sin que hayas cambiado de app. */

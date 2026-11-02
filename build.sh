@@ -17,8 +17,8 @@ if [ -z "${ANDROID_JAR:-}" ]; then
 fi
 MIN_SDK=26
 TARGET_SDK=35
-VERSION_CODE=25
-VERSION_NAME=3.4
+VERSION_CODE=26
+VERSION_NAME=3.5
 KEYSTORE="${KEYSTORE:-sinshorts.keystore}"
 KS_PASS="${KS_PASS:-sinshorts}"
 SRC=app/src/main
