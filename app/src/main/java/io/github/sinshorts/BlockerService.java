@@ -85,16 +85,22 @@ public class BlockerService extends AccessibilityService
     private long igEnteredAt;
     private String foregroundPkg = "";
     private long lastAnchorFix;
+    private long overlaysFrozenUntil;
+    private int trayMarkX = Integer.MIN_VALUE; // posición de la primera historia al tocar la fila
     private int restHeaderTop = -1;          // posición de la cabecera con el feed arriba del todo
     private long lastScrollScan;
     private boolean sawScrollSinceTouch;     // tras tocar la fila de historias, ¿empezaste a deslizar?
-    private static final long STORY_GUESS = 220, WATCHDOG = 1500;
+    private static final long STORY_GUESS = 300, WATCHDOG = 1500;
 
     /** Tocaste fuera de la cortina y no deslizaste: era un toque en una historia. */
     private final Runnable storyGuess = new Runnable() {
         @Override
         public void run() {
-            if (!sawScrollSinceTouch && curtain.mode() == Curtain.HOME_FEED) pauseCurtain(700);
+            if (sawScrollSinceTouch || curtain.mode() != Curtain.HOME_FEED) return;
+            // ¿Se ha movido la fila de historias desde que pusiste el dedo? Entonces es un deslizamiento
+            int now = trayMark();
+            if (trayMarkX != Integer.MIN_VALUE && now != Integer.MIN_VALUE && Math.abs(now - trayMarkX) > dp(4)) return;
+            pauseCurtain(700);
         }
     };
 
@@ -519,8 +525,10 @@ public class BlockerService extends AccessibilityService
                     if (header != null) guards.add(boundsOf(header));
                     AccessibilityNodeInfo homeTab = visible(root, "feed_tab");
                     if (homeTab != null) guards.add(boundsOf(homeTab));
-                    curtain.setGuards(guards);
-                    curtain.setHotspots(exitButtons(root, header));
+                    if (SystemClock.uptimeMillis() >= overlaysFrozenUntil) {
+                        curtain.setGuards(guards);
+                        curtain.setHotspots(exitButtons(root, header));
+                    }
                 }
                 return;
             }
@@ -555,6 +563,12 @@ public class BlockerService extends AccessibilityService
 
     private boolean showCurtain(int mode, Rect r) {
         if (r.height() < dp(120)) {
+            curtain.hide();
+            return false;
+        }
+        // Saliendo de Instagram: sigue enviando avisos un rato desde el fondo; no tapar el escritorio
+        if ((!foregroundPkg.isEmpty() && !IG.equals(foregroundPkg))
+                || (curtain.mode() == Curtain.NONE && launcherVisible())) {
             curtain.hide();
             return false;
         }
@@ -616,7 +630,9 @@ public class BlockerService extends AccessibilityService
     @Override
     public void onHotspotUp(final float x, final float y, long pressMs) {
         curtain.removeHotspots();
+        curtain.removeGuards();
         final long d = Math.max(40, Math.min(1500, pressMs));
+        overlaysFrozenUntil = SystemClock.uptimeMillis() + d + 350;
         handler.postDelayed(new Runnable() {
             @Override
             public void run() {
@@ -692,6 +708,7 @@ public class BlockerService extends AccessibilityService
         // enseguida, has tocado una historia → quitar la cortina sin esperar al visor
         if (curtain.mode() == Curtain.HOME_FEED) {
             sawScrollSinceTouch = false;
+            trayMarkX = trayMark();
             handler.removeCallbacks(storyGuess);
             handler.postDelayed(storyGuess, STORY_GUESS);
         }
@@ -719,7 +736,10 @@ public class BlockerService extends AccessibilityService
     @Override
     public void onGuardTap(final float x, final float y, long pressMs) {
         curtain.removeGuards();
+        curtain.removeHotspots();
         final long d = Math.max(40, Math.min(1000, pressMs));
+        // Hasta que Instagram reciba el toque repetido, no volver a poner zonas encima
+        overlaysFrozenUntil = SystemClock.uptimeMillis() + d + 350;
         handler.postDelayed(new Runnable() {
             @Override
             public void run() {
@@ -741,6 +761,35 @@ public class BlockerService extends AccessibilityService
                     .build(), null, null);
         } catch (Exception ignored) {
         }
+    }
+
+    /** Posición horizontal del primer elemento visible de la fila de historias. */
+    private int trayMark() {
+        try {
+            AccessibilityNodeInfo root = getRootInActiveWindow();
+            if (root == null) return Integer.MIN_VALUE;
+            AccessibilityNodeInfo tray = visible(root, "reels_tray_container");
+            if (tray == null) return Integer.MIN_VALUE;
+            ArrayDeque<AccessibilityNodeInfo> q = new ArrayDeque<AccessibilityNodeInfo>();
+            q.add(tray);
+            int seen = 0;
+            Rect tb = boundsOf(tray);
+            while (!q.isEmpty() && seen < 60) {
+                AccessibilityNodeInfo n = q.poll();
+                seen++;
+                if (n != tray && n.isVisibleToUser()) {
+                    Rect b = boundsOf(n);
+                    // un elemento de la fila (más estrecho que la fila entera)
+                    if (b.width() > 0 && b.width() < tb.width() / 2) return b.left;
+                }
+                for (int i = 0; i < n.getChildCount(); i++) {
+                    AccessibilityNodeInfo c = n.getChild(i);
+                    if (c != null) q.add(c);
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        return Integer.MIN_VALUE;
     }
 
     /** ¿Se ve el escritorio o la vista de apps recientes? (gesto de salir de Instagram) */
