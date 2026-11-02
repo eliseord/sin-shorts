@@ -512,6 +512,9 @@ public class BlockerService extends AccessibilityService
                     // (+, corazón, mensajes, logo) queda libre: un toque y entras
                     if (SystemClock.uptimeMillis() >= overlaysFrozenUntil) {
                         curtain.removeGuards();
+                        // Escudo sobre cabecera e historias: con él y la cortina, nada del inicio
+                        // se puede deslizar; los toques se convierten en pulsaciones directas
+                        curtain.setShield(new Rect(win.left, topLimit(win), win.right, top));
                         curtain.setHotspots(exitButtons(root, null));
                     }
                 }
@@ -691,12 +694,102 @@ public class BlockerService extends AccessibilityService
         handler.post(outsideTick);
         // En el inicio, lo único sin tapar es la fila de historias: si no empiezas a deslizar
         // enseguida, has tocado una historia → quitar la cortina sin esperar al visor
-        if (curtain.mode() == Curtain.HOME_FEED) {
-            sawScrollSinceTouch = false;
-            trayMarkX = trayMark();
-            handler.removeCallbacks(storyGuess);
-            handler.postDelayed(storyGuess, STORY_GUESS);
+    }
+
+    // ------------------------------------------- escudo de la parte de arriba del inicio
+
+    /** El elemento pulsable más pequeño bajo el punto (x, y) en Instagram. */
+    private AccessibilityNodeInfo nodeAt(float x, float y, boolean longClick) {
+        AccessibilityNodeInfo root = getRootInActiveWindow();
+        if (root == null) return null;
+        AccessibilityNodeInfo best = null;
+        long bestArea = Long.MAX_VALUE;
+        ArrayDeque<AccessibilityNodeInfo> q = new ArrayDeque<AccessibilityNodeInfo>();
+        q.add(root);
+        int seen = 0;
+        while (!q.isEmpty() && seen < 1500) {
+            AccessibilityNodeInfo n = q.poll();
+            seen++;
+            Rect b = boundsOf(n);
+            if (!b.contains((int) x, (int) y)) continue; // ni este ni sus hijos
+            if (n.isVisibleToUser() && (longClick ? n.isLongClickable() : n.isClickable())) {
+                long area = (long) b.width() * b.height();
+                if (area < bestArea) {
+                    best = n;
+                    bestArea = area;
+                }
+            }
+            for (int i = 0; i < n.getChildCount(); i++) {
+                AccessibilityNodeInfo c = n.getChild(i);
+                if (c != null) q.add(c);
+            }
         }
+        return best;
+    }
+
+    /**
+     * Toque en la cabecera o las historias: quitar la cortina en el acto y pulsar
+     * directamente ese botón (sin repetir el toque con un dedo virtual).
+     */
+    @Override
+    public void onShieldTap(float x, float y) {
+        AccessibilityNodeInfo node = nodeAt(x, y, false);
+        if (node == null) return; // zona vacía: no hacer nada
+        AccessibilityNodeInfo root = getRootInActiveWindow();
+        AccessibilityNodeInfo header = root != null ? visible(root, "main_feed_action_bar") : null;
+        AccessibilityNodeInfo logo = header != null ? findLogo(header) : null;
+        boolean isLogo = logo != null && Rect.intersects(boundsOf(logo), boundsOf(node));
+        // Retirar cortina y escudo ya: vas a otra pantalla (o al menú del logo)
+        pauseCurtain(isLogo ? 700 : 1500);
+        if (isLogo || !node.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+            // El logo no responde a la pulsación directa: toque real (el escudo ya no está)
+            final float fx = x, fy = y;
+            handler.postDelayed(new Runnable() {
+                @Override
+                public void run() {
+                    tapAt(fx, fy, 60);
+                }
+            }, 40);
+        }
+    }
+
+    @Override
+    public void onShieldLongPress(float x, float y) {
+        AccessibilityNodeInfo node = nodeAt(x, y, true);
+        if (node == null) return;
+        pauseCurtain(1500);
+        node.performAction(AccessibilityNodeInfo.ACTION_LONG_CLICK);
+    }
+
+    /** Deslizar a los lados sobre las historias: avanzar o retroceder la fila. */
+    @Override
+    public void onShieldSwipe(float x0, float y0, float dx) {
+        AccessibilityNodeInfo root = getRootInActiveWindow();
+        if (root == null) return;
+        AccessibilityNodeInfo tray = visible(root, "reels_tray_container");
+        if (tray == null || !boundsOf(tray).contains((int) x0, (int) y0)) return; // en la cabecera: nada
+        AccessibilityNodeInfo list = horizontalList(tray);
+        if (list != null) {
+            list.performAction(dx < 0 ? AccessibilityNodeInfo.ACTION_SCROLL_FORWARD : AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD);
+        }
+    }
+
+    /** La lista horizontal de historias (la propia fila o un hijo desplazable). */
+    private static AccessibilityNodeInfo horizontalList(AccessibilityNodeInfo tray) {
+        if (tray.isScrollable()) return tray;
+        ArrayDeque<AccessibilityNodeInfo> q = new ArrayDeque<AccessibilityNodeInfo>();
+        q.add(tray);
+        int seen = 0;
+        while (!q.isEmpty() && seen < 40) {
+            AccessibilityNodeInfo n = q.poll();
+            seen++;
+            if (n != tray && n.isScrollable()) return n;
+            for (int i = 0; i < n.getChildCount(); i++) {
+                AccessibilityNodeInfo c = n.getChild(i);
+                if (c != null) q.add(c);
+            }
+        }
+        return null;
     }
 
     /**

@@ -35,6 +35,13 @@ final class Curtain {
         /** Toque (sin deslizar) sobre una zona protegida: repetirlo en Instagram sin quitar la cortina. */
         void onGuardTap(float x, float y, long pressMs);
 
+        /** Escudo de la parte de arriba del inicio: toque, pulsación larga y deslizamiento horizontal. */
+        void onShieldTap(float x, float y);
+
+        void onShieldLongPress(float x, float y);
+
+        void onShieldSwipe(float x0, float y0, float dx);
+
         /** Has puesto el dedo sobre un botón de Instagram que saca del inicio (perfil, mensajes…). */
         void onHotspotDown();
 
@@ -149,6 +156,92 @@ final class Curtain {
         }
     }
 
+    // Escudo transparente sobre la cabecera y las historias del inicio: nada se desliza debajo
+    private View shieldView;
+    private final Rect shieldRect = new Rect();
+
+    void setShield(Rect r) {
+        if (hotspotTouchActive) return;
+        if (r == null || r.height() <= 0) {
+            removeShield();
+            return;
+        }
+        if (shieldView != null && shieldRect.equals(r)) return;
+        if (shieldView != null) {
+            shieldRect.set(r);
+            try {
+                wm.updateViewLayout(shieldView, overlayParams(r));
+            } catch (Exception ignored) {
+            }
+            return;
+        }
+        final android.os.Handler h = new android.os.Handler(android.os.Looper.getMainLooper());
+        View v = new View(service);
+        v.setOnTouchListener(new View.OnTouchListener() {
+            float x0, y0;
+            boolean moved, longDone;
+            final Runnable longPress = new Runnable() {
+                @Override
+                public void run() {
+                    longDone = true;
+                    actions.onShieldLongPress(x0, y0);
+                }
+            };
+
+            @Override
+            public boolean onTouch(View view, android.view.MotionEvent e) {
+                switch (e.getActionMasked()) {
+                    case android.view.MotionEvent.ACTION_DOWN:
+                        x0 = e.getRawX();
+                        y0 = e.getRawY();
+                        moved = false;
+                        longDone = false;
+                        h.postDelayed(longPress, 500);
+                        return true;
+                    case android.view.MotionEvent.ACTION_MOVE:
+                        if (!moved && (Math.abs(e.getRawX() - x0) > dp(12) || Math.abs(e.getRawY() - y0) > dp(12))) {
+                            moved = true;
+                            h.removeCallbacks(longPress);
+                        }
+                        return true;
+                    case android.view.MotionEvent.ACTION_UP:
+                        h.removeCallbacks(longPress);
+                        if (longDone) return true;
+                        float dx = e.getRawX() - x0, dy = e.getRawY() - y0;
+                        if (!moved) {
+                            actions.onShieldTap(x0, y0);
+                        } else if (Math.abs(dx) > dp(40) && Math.abs(dx) > 1.5f * Math.abs(dy)) {
+                            actions.onShieldSwipe(x0, y0, dx);
+                        }
+                        // deslizamientos verticales: no hacen nada
+                        return true;
+                    case android.view.MotionEvent.ACTION_CANCEL:
+                        h.removeCallbacks(longPress);
+                        return true;
+                    default:
+                        return true;
+                }
+            }
+        });
+        try {
+            wm.addView(v, overlayParams(r));
+            shieldView = v;
+            shieldRect.set(r);
+        } catch (Exception ignored) {
+        }
+    }
+
+    void removeShield() {
+        if (shieldView != null) {
+            try {
+                wm.removeView(shieldView);
+            } catch (Exception ignored) {
+            }
+        }
+        shieldView = null;
+        shieldRect.setEmpty();
+    }
+
     void removeGuards() {
         for (View v : guardViews) {
             try {
@@ -235,6 +328,7 @@ final class Curtain {
     void hideKeepingHotspots() {
         boolean keep = hotspotTouchActive;
         removeGuards();
+        removeShield();
         if (view != null) {
             try {
                 wm.removeView(view);
@@ -249,6 +343,7 @@ final class Curtain {
     }
 
     void hide() {
+        removeShield();
         removeGuards();
         removeHotspots();
         passThrough = false;
