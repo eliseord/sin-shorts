@@ -8,7 +8,7 @@ App Android de código abierto que bloquea los vídeos cortos sin bloquear las a
 |---|---|---|
 | YouTube | Pestaña Shorts y cualquier Short que abras | Vídeos normales, suscripciones, búsqueda |
 | Instagram | Pestaña Reels y el visor de Reels | Feed, historias, mensajes, perfiles |
-| Instagram: solo seguidos | Tapa el feed de inicio (sugerencias sin fin) con un botón que abre el feed «Siguiendo» | Feed «Siguiendo», historias, mensajes |
+| Instagram: solo seguidos | Tapa el feed de inicio (sugerencias sin fin) y bloquea el desplazamiento en la pantalla de inicio; un botón abre el feed «Siguiendo» | Feed «Siguiendo», historias, mensajes, notificaciones, publicar |
 | Instagram: Explorar | Tapa la cuadrícula de Explorar | Buscar personas |
 | Facebook *(experimental)* | Pestaña Reels | Todo lo demás |
 | Snapchat *(experimental)* | Spotlight | Chats, cámara, historias |

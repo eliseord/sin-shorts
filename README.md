@@ -8,7 +8,7 @@ Open-source Android app that blocks short-form video **without blocking the apps
 |---|---|---|
 | YouTube | The Shorts tab and any Short you open | Regular videos, subscriptions, search |
 | Instagram | The Reels tab and the Reels viewer | Feed, stories, messages, profiles |
-| Instagram: following only | Covers the home feed (endless suggestions) with a button that opens the “Following” feed | “Following” feed, stories, messages |
+| Instagram: following only | Covers the home feed (endless suggestions) and locks scrolling on the home screen; one button opens the “Following” feed | “Following” feed, stories, messages, notifications, posting |
 | Instagram: Explore | Covers the Explore grid | Searching for people |
 | Facebook *(experimental)* | The Reels tab | Everything else |
 | Snapchat *(experimental)* | Spotlight | Chats, camera, stories |
