@@ -447,6 +447,14 @@ public class OnboardingActivity extends Activity {
             s.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
                 @Override
                 public void onCheckedChanged(CompoundButton b, boolean checked) {
+                    if (!checked && prefs.getBoolean(Setup.KEY_ONBOARDING_DONE, false)) {
+                        // Repetir la guía no sirve para saltarse la espera de 30 s
+                        b.setOnCheckedChangeListener(null);
+                        b.setChecked(true);
+                        b.setOnCheckedChangeListener(this);
+                        startActivity(PauseActivity.setting(OnboardingActivity.this, c.key, false, c.title()));
+                        return;
+                    }
                     prefs.edit().putBoolean(c.key, checked).apply();
                 }
             });
@@ -476,8 +484,9 @@ public class OnboardingActivity extends Activity {
             setNext(L.t("Skip the test", "Saltar la prueba"));
             return;
         }
-        if (!active) {
+        if (!active || Pause.isPaused(this)) {
             prefs.edit().putBoolean(Rules.KEY_ENABLED, true).apply();
+            Pause.resume(this); // para probar, el bloqueo tiene que estar en marcha
         }
 
         body(L.t("Tap a button: a short video will open. If all goes well, Sin Shorts will take you out within a second and you’ll be back here.",

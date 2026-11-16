@@ -68,7 +68,30 @@ public class BlockerService extends AccessibilityService
 
     private volatile List<Rules.Rule> rules;
     private volatile Set<String> watched = new HashSet<String>();
-    private volatile boolean enabled, toast, diag, igFollowing, igExplore;
+    private volatile boolean enabled, toast, diag, igFollowing, igExplore, allowShared;
+    private volatile long pausedUntil;      // pausa temporal (hora del reloj, ms)
+
+    // --- Vídeos que te mandan: se permite ese, y solo ese
+    private static final long SHARED_ENTRY_WINDOW = 4000; // abrir desde otra app: hasta 4 s
+    private static final long SHARED_GRACE = 1200;        // primeros ms: los desplazamientos no cuentan
+    private String prevFgPkg = "";
+    private long fgEnteredAt;
+    private boolean igLastScreenWasChat;
+    private String passPkg;
+    private String passUrl;
+    private long passGrantedAt;
+    private boolean passRevoked;
+
+    /** Fin de la pausa: el bloqueo vuelve solo. */
+    private final Runnable pauseOver = new Runnable() {
+        @Override
+        public void run() {
+            if (active() && watched.contains(foregroundPkg)) {
+                notice.show(L.t("Sin Shorts: blocking is back on", "Sin Shorts: el bloqueo vuelve a estar activo"), 2200);
+                scan();
+            }
+        }
+    };
 
     private boolean scanPending;
     private long lastAction, retryStart;
@@ -109,7 +132,7 @@ public class BlockerService extends AccessibilityService
     private final Runnable watchdog = new Runnable() {
         @Override
         public void run() {
-            if (!IG.equals(foregroundPkg) || !enabled) return;
+            if (!IG.equals(foregroundPkg) || !active()) return;
             if (curtain.mode() == Curtain.NONE && SystemClock.uptimeMillis() >= curtainPausedUntil) scan();
             handler.postDelayed(this, WATCHDOG);
         }
@@ -183,9 +206,19 @@ public class BlockerService extends AccessibilityService
         rules = r;
         watched = pk;
         enabled = prefs.getBoolean(Rules.KEY_ENABLED, true);
+        pausedUntil = prefs.getLong(Pause.KEY_UNTIL, 0);
+        allowShared = prefs.getBoolean(Rules.KEY_SHARED, true);
+        handler.removeCallbacks(pauseOver);
+        long left = pausedUntil - System.currentTimeMillis();
+        if (left > 0) handler.postDelayed(pauseOver, left + 200);
         toast = prefs.getBoolean(Rules.KEY_TOAST, true);
         diag = prefs.getBoolean(Rules.KEY_DIAG, false);
-        if (curtain != null && (!enabled || (!igFollowing && !igExplore))) curtain.hide();
+        if (curtain != null && (!active() || (!igFollowing && !igExplore))) curtain.hide();
+    }
+
+    /** Bloqueo en marcha: no está en pausa. */
+    private boolean active() {
+        return enabled && System.currentTimeMillis() >= pausedUntil;
     }
 
     @Override
@@ -199,6 +232,13 @@ public class BlockerService extends AccessibilityService
         if (event.getPackageName() == null) return;
         String pkg = event.getPackageName().toString();
 
+        if (event.getEventType() == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED && !isTransient(pkg)
+                && !pkg.equals(foregroundPkg)) {
+            prevFgPkg = foregroundPkg;
+            fgEnteredAt = SystemClock.uptimeMillis();
+            if (passPkg != null && !passPkg.equals(pkg)) passPkg = null; // saliste: se acabó el permiso
+            if (!pkg.equals(IG)) igLastScreenWasChat = false;
+        }
         if (event.getEventType() == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED && !isTransient(pkg)) {
             if (pkg.equals(IG) && !IG.equals(foregroundPkg)) {
                 igEnteredAt = SystemClock.uptimeMillis();
@@ -226,7 +266,18 @@ public class BlockerService extends AccessibilityService
             }
         }
 
-        if (!enabled || !watched.contains(pkg)) return;
+        if (!active() || !watched.contains(pkg)) return;
+
+        // Vídeo compartido: deslizar al siguiente acaba el permiso
+        if (event.getEventType() == AccessibilityEvent.TYPE_VIEW_SCROLLED && pkg.equals(passPkg)
+                && passUrl == null && !passRevoked
+                && SystemClock.uptimeMillis() - passGrantedAt > SHARED_GRACE && isNextVideoSwipe(pkg, event)) {
+            passRevoked = true;
+            handler.removeCallbacks(scanTask);
+            scanPending = true;
+            handler.postDelayed(scanTask, 150);
+            return;
+        }
 
         if (pkg.equals(IG)) {
             settleRuns = 0;
@@ -292,7 +343,7 @@ public class BlockerService extends AccessibilityService
             CharSequence cs = root.getPackageName();
             if (cs == null) return;
             String pkg = cs.toString();
-            if (!enabled) {
+            if (!active()) {
                 curtain.hide();
                 return;
             }
@@ -304,15 +355,26 @@ public class BlockerService extends AccessibilityService
                 return;
             }
 
+            if (pkg.equals(IG)) {
+                // ¿Estás en una conversación? (para dejar ver el Reel que te mandan ahí)
+                if (dmThreadVisible(root)) igLastScreenWasChat = true;
+                else if (visible(root, "clips_viewer_view_pager") == null && visible(root, "clips_viewer") == null)
+                    igLastScreenWasChat = false; // cualquier otra pantalla que no sea el Reel abierto
+
+            }
+
             List<Rules.Rule> current = rules;
             for (Rules.Rule rule : current) {
                 if (!rule.packages.contains(pkg)) continue;
                 if (matches(root, pkg, rule)) {
                     curtain.hide();
+                    if (sharedPass(root, pkg, rule)) return;
                     block(rule);
                     return;
                 }
             }
+            // Ya no estás en el vídeo compartido: el permiso no sirve para el próximo
+            if (pkg.equals(passPkg)) passPkg = null;
 
             if (pkg.equals(IG)) updateCurtain(root);
             else curtain.hide();
@@ -383,6 +445,86 @@ public class BlockerService extends AccessibilityService
                 src = src.getParent();
             }
         } catch (Exception ignored) {
+        }
+        return "";
+    }
+
+    /**
+     * ¿Es un vídeo que te han mandado? Se permite si lo abres desde una conversación de
+     * Instagram o desde otra app (WhatsApp, Telegram, un enlace…), y solo ese: al deslizar al
+     * siguiente, o si en el navegador cambia la dirección, se bloquea como siempre.
+     */
+    private boolean sharedPass(AccessibilityNodeInfo root, String pkg, Rules.Rule rule) {
+        if (!allowShared) return false;
+        // Las pestañas (Reels, Spotlight) nunca: solo un vídeo abierto directamente
+        if (rule.type == Rules.ID_SEL || rule.type == Rules.TEXT_SEL || rule.type == Rules.TEXT) return false;
+        String url = rule.type == Rules.URL ? currentUrl(root, pkg) : null;
+
+        if (pkg.equals(passPkg)) {
+            if (passRevoked) return false;
+            if (passUrl != null) return passUrl.equals(url);
+            return true;
+        }
+        long now = SystemClock.uptimeMillis();
+        boolean fromOtherApp = pkg.equals(foregroundPkg) && now - fgEnteredAt < SHARED_ENTRY_WINDOW
+                && prevFgPkg.length() > 0 && !launcherPkgs.contains(prevFgPkg)
+                && !prevFgPkg.equals(getPackageName()) && !isTransient(prevFgPkg);
+        boolean fromIgChat = pkg.equals(IG) && igLastScreenWasChat;
+        if (!fromOtherApp && !fromIgChat) return false;
+
+        passPkg = pkg;
+        passUrl = url;
+        passGrantedAt = now;
+        passRevoked = false;
+        if (toast) {
+            notice.show(L.t("Sin Shorts: video someone sent you, allowed. Swiping to the next one is blocked.",
+                    "Sin Shorts: vídeo que te han mandado, permitido. Pasar al siguiente está bloqueado."), 2600);
+        }
+        return true;
+    }
+
+    /** ¿Este desplazamiento es pasar al siguiente vídeo (y no, por ejemplo, abrir los comentarios)? */
+    private static boolean isNextVideoSwipe(String pkg, AccessibilityEvent event) {
+        String id = null;
+        try {
+            AccessibilityNodeInfo src = event.getSource();
+            if (src != null) id = src.getViewIdResourceName();
+        } catch (Exception ignored) {
+        }
+        if (pkg.equals(IG)) return id != null && id.contains("clips");
+        if (pkg.equals("com.google.android.youtube")) return id != null && id.contains("reel");
+        return true; // TikTok y otras: cualquier deslizamiento es pasar al siguiente
+    }
+
+    /** Conversación abierta en Instagram: el cuadro para escribir un mensaje está a la vista. */
+    private boolean dmThreadVisible(AccessibilityNodeInfo root) {
+        if (visible(root, "tab_bar") != null) return false; // en una conversación no hay barra de pestañas
+        for (String id : new String[]{"row_thread_composer_edittext", "row_thread_composer_container"}) {
+            if (visible(root, id) != null) return true;
+        }
+        ArrayDeque<AccessibilityNodeInfo> q = new ArrayDeque<AccessibilityNodeInfo>();
+        q.add(root);
+        int seen = 0;
+        while (!q.isEmpty() && seen < 400) {
+            AccessibilityNodeInfo n = q.poll();
+            seen++;
+            String id = n.getViewIdResourceName();
+            if (id != null && n.isVisibleToUser() && (id.contains("thread_composer") || id.contains("direct_thread"))) return true;
+            for (int i = 0; i < n.getChildCount(); i++) {
+                AccessibilityNodeInfo c = n.getChild(i);
+                if (c != null) q.add(c);
+            }
+        }
+        return false;
+    }
+
+    private static String currentUrl(AccessibilityNodeInfo root, String pkg) {
+        for (String id : URL_BAR_IDS) {
+            List<AccessibilityNodeInfo> nodes = root.findAccessibilityNodeInfosByViewId(pkg + ":id/" + id);
+            if (nodes == null) continue;
+            for (AccessibilityNodeInfo n : nodes) {
+                if (n != null && n.getText() != null) return n.getText().toString();
+            }
         }
         return "";
     }

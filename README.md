@@ -17,6 +17,10 @@ Open-source Android app that blocks short-form video **without blocking the apps
 
 When you enter one of those sections, the app presses Back for you. If the app insists, it sends you to the home screen.
 
+**Pause, not off.** There is no off switch: blocking can only be paused for 5, 10 or 15 minutes and comes back on by itself. Pausing, switching off a category or allowing shared videos requires a 30-second wait first; resuming is instant.
+
+**Videos people send you.** A Reel, Short or TikTok opened from an Instagram chat or from another app (WhatsApp, Telegram, a link…) can be watched. Swiping to the next one is blocked as usual.
+
 **Privacy:** the app does not request the Internet permission, so it cannot send anything off the phone. It only reads the screen structure of the listed apps to recognise those sections.
 
 The app is in English by default and can be switched to Spanish in the setup guide or in **Options → Language**.

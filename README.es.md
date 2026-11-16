@@ -17,6 +17,10 @@ App Android de código abierto que bloquea los vídeos cortos sin bloquear las a
 
 Cuando entras en una de esas secciones, la app pulsa «Atrás» por ti. Si la app insiste, te manda a la pantalla de inicio.
 
+**Pausa, no apagado.** No hay interruptor para apagarla: el bloqueo solo se puede pausar 5, 10 o 15 minutos y vuelve solo. Pausar, desactivar una categoría o permitir los vídeos compartidos exige esperar 30 segundos antes; volver a bloquear es inmediato.
+
+**Vídeos que te mandan.** Un Reel, Short o TikTok abierto desde una conversación de Instagram o desde otra app (WhatsApp, Telegram, un enlace…) se puede ver. Pasar al siguiente se bloquea como siempre.
+
 **Privacidad:** no pide permiso de Internet, así que no puede enviar nada fuera del teléfono. Solo lee la estructura de la pantalla de las apps de la lista para reconocer esas secciones.
 
 ## Instalar

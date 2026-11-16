@@ -36,6 +36,8 @@ public final class Rules {
     /** Categorías especiales: no son reglas de «salir», sino cortinas sobre una zona de Instagram. */
     public static final String KEY_IG_FOLLOWING = "cat_ig_following";
     public static final String KEY_IG_EXPLORE = "cat_ig_explore";
+    /** Allow a single short video that someone sent you (from a chat or another app). */
+    public static final String KEY_SHARED = "allow_shared";
     public static final String INSTAGRAM = "com.instagram.android";
 
     public static final int ID = 0, ID_SEL = 1, TEXT = 2, TEXT_SEL = 3, URL = 4, APP = 5;

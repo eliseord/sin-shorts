@@ -39,6 +39,20 @@ public class MainActivity extends Activity implements SharedPreferences.OnShared
     private View statusDot;
     private Button fixButton;
     private EditText customRules;
+    private TextView pauseTitle, pauseBody;
+    private LinearLayout chips;
+    private Button pauseButton;
+    private final java.util.Map<String, Switch> switches = new java.util.HashMap<String, Switch>();
+    private boolean syncing;
+    private final android.os.Handler ticker = new android.os.Handler(android.os.Looper.getMainLooper());
+    private final Runnable tick = new Runnable() {
+        @Override
+        public void run() {
+            refreshPause();
+            refreshStatus();
+            ticker.postDelayed(this, 15_000);
+        }
+    };
     private boolean createdInSpanish;
 
     private static final Map<String, String> FRIENDLY = new HashMap<String, String>();
@@ -59,6 +73,7 @@ public class MainActivity extends Activity implements SharedPreferences.OnShared
         L.init(this);
         createdInSpanish = L.es();
         prefs = getSharedPreferences(Rules.PREFS, MODE_PRIVATE);
+        Pause.migrate(this);
         ui = new Ui(this);
 
         // La primera vez, la guía de configuración va delante
@@ -104,12 +119,41 @@ public class MainActivity extends Activity implements SharedPreferences.OnShared
         });
         status.addView(fixButton, ui.fullWidth(12));
 
-        // ---- Interruptor general y contador
+        // ---- Pausa (ya no hay interruptor de apagar)
         LinearLayout main = ui.card(page);
-        Switch master = toggle(main, L.t("Blocking on", "Bloqueo activado"), L.t("Turn it off to take a break without touching accessibility settings.",
-                        "Desactívalo para hacer una pausa sin tocar los ajustes de accesibilidad."),
-                Rules.KEY_ENABLED, true);
-        master.setTypeface(Typeface.DEFAULT_BOLD);
+        pauseTitle = ui.text("", 16, ui.fg, true);
+        main.addView(pauseTitle);
+        pauseBody = ui.text("", 13, ui.fgMuted, false);
+        pauseBody.setPadding(0, ui.dp(4), 0, ui.dp(4));
+        main.addView(pauseBody);
+        chips = new LinearLayout(this);
+        for (final int m : Pause.OPTIONS) {
+            Button chip = ui.button(m + " min");
+            chip.setTag(m);
+            chip.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    Pause.setMinutes(MainActivity.this, m);
+                    refreshPause();
+                }
+            });
+            chips.addView(chip, ui.weight());
+        }
+        main.addView(chips, ui.fullWidth(0));
+        pauseButton = ui.primary("");
+        pauseButton.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                if (Pause.isPaused(MainActivity.this)) {
+                    Pause.resume(MainActivity.this); // volver a bloquear: siempre al instante
+                    refreshPause();
+                    refreshStatus();
+                } else {
+                    startActivity(PauseActivity.pause(MainActivity.this));
+                }
+            }
+        });
+        main.addView(pauseButton, ui.fullWidth(8));
         countText = ui.text("", 14, ui.fgMuted, false);
         countText.setPadding(0, ui.dp(10), 0, 0);
         main.addView(countText);
@@ -133,6 +177,11 @@ public class MainActivity extends Activity implements SharedPreferences.OnShared
         langRow.addView(langButton("English", false));
         langRow.addView(langButton("Español", true));
         opts.addView(langRow, ui.fullWidth(0));
+        ui.divider(opts);
+        toggle(opts, L.t("Allow videos people send you", "Permitir los vídeos que te mandan"),
+                L.t("A Reel, Short or TikTok opened from a chat or another app can be watched. Swiping to the next one is blocked.",
+                        "Un Reel, Short o TikTok abierto desde una conversación u otra app se puede ver. Pasar al siguiente está bloqueado."),
+                Rules.KEY_SHARED, true);
         ui.divider(opts);
         toggle(opts, L.t("Notify when blocking", "Avisar al bloquear"), L.t("Shows a short message each time it takes you out of a short video.",
                         "Muestra un mensaje breve cada vez que te saca de un vídeo corto."),
@@ -249,13 +298,17 @@ public class MainActivity extends Activity implements SharedPreferences.OnShared
             return;
         }
         prefs.registerOnSharedPreferenceChangeListener(this);
+        syncSwitches();
         refreshStatus();
         refreshCount();
         refreshDiagnostics();
+        ticker.removeCallbacks(tick);
+        ticker.post(tick);
     }
 
     @Override
     protected void onPause() {
+        ticker.removeCallbacks(tick);
         prefs.unregisterOnSharedPreferenceChangeListener(this);
         super.onPause();
     }
@@ -263,12 +316,16 @@ public class MainActivity extends Activity implements SharedPreferences.OnShared
     @Override
     public void onSharedPreferenceChanged(SharedPreferences p, String key) {
         refreshCount();
-        if (Rules.KEY_ENABLED.equals(key)) refreshStatus();
+        if (Pause.KEY_UNTIL.equals(key)) {
+            refreshPause();
+            refreshStatus();
+        }
+        if (key != null && switches.containsKey(key)) syncSwitches();
     }
 
     private void refreshStatus() {
         boolean on = Setup.serviceEnabled(this);
-        boolean active = on && prefs.getBoolean(Rules.KEY_ENABLED, true);
+        boolean active = on && !Pause.isPaused(this);
         statusDot.setBackground(ui.dot(active ? ui.ok : ui.warn));
         if (!on) {
             statusTitle.setText(L.t("Protection needs to be turned on", "Falta activar la protección"));
@@ -276,13 +333,60 @@ public class MainActivity extends Activity implements SharedPreferences.OnShared
                     "Sin el servicio de accesibilidad no se puede bloquear nada. La guía te lleva paso a paso."));
         } else if (!active) {
             statusTitle.setText(L.t("Paused", "En pausa"));
-            statusBody.setText(L.t("The service is on, but blocking is paused.", "El servicio está activado, pero el bloqueo está en pausa."));
+            statusBody.setText(L.t("Blocking comes back on by itself when the pause ends.",
+                    "El bloqueo vuelve solo cuando acaba la pausa."));
         } else {
             statusTitle.setText(L.t("Protection active", "Protección activa"));
             statusBody.setText(L.t("It works on its own in the background. You don’t need to keep the app open.",
                     "Funciona sola en segundo plano. No hace falta tener la app abierta."));
         }
         fixButton.setVisibility(on ? View.GONE : View.VISIBLE);
+    }
+
+    private void refreshPause() {
+        if (pauseButton == null) return;
+        long left = Pause.remainingMs(this);
+        if (left > 0) {
+            int mins = (int) Math.ceil(left / 60_000.0);
+            String at = new SimpleDateFormat("HH:mm", Locale.getDefault()).format(new Date(Pause.until(this)));
+            pauseTitle.setText(L.t("Paused · back at " + at, "En pausa · vuelve a las " + at));
+            pauseBody.setText(L.t(mins + (mins == 1 ? " minute" : " minutes") + " left. Blocking comes back on by itself.",
+                    "Queda" + (mins == 1 ? " 1 minuto" : "n " + mins + " minutos") + ". El bloqueo vuelve solo."));
+            chips.setVisibility(View.GONE);
+            pauseButton.setText(L.t("Resume blocking now", "Volver a bloquear ya"));
+        } else {
+            int sel = Pause.minutes(this);
+            pauseTitle.setText(L.t("Need a break?", "¿Necesitas un respiro?"));
+            pauseBody.setText(L.t("Blocking can’t be turned off, only paused. It comes back on by itself, and pausing takes a 30-second wait.",
+                    "El bloqueo no se apaga, solo se pausa. Vuelve solo, y pausarlo requiere esperar 30 segundos."));
+            chips.setVisibility(View.VISIBLE);
+            for (int i = 0; i < chips.getChildCount(); i++) {
+                Button b = (Button) chips.getChildAt(i);
+                boolean on = ((Integer) b.getTag()) == sel;
+                b.setTypeface(on ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
+                b.setTextColor(on ? ui.accent : ui.fgMuted);
+                b.setBackground(on ? ui.rounded(ui.dark ? 0x22FF6B6E : 0x14E5383B, 18) : null);
+            }
+            pauseButton.setText(L.t("Pause for " + sel + " min", "Pausar " + sel + " min"));
+        }
+    }
+
+    /** Ajustes que «aflojan» el bloqueo: cambiarlos exige la espera de 30 s. */
+    private static Boolean looseValue(String key) {
+        if (key.startsWith("cat_")) return false;          // desactivar una categoría
+        if (Rules.KEY_SHARED.equals(key)) return true;     // permitir vídeos compartidos
+        return null;
+    }
+
+    private void syncSwitches() {
+        syncing = true;
+        for (java.util.Map.Entry<String, Switch> e : switches.entrySet()) {
+            Rules.Category c = null;
+            for (Rules.Category k : Rules.CATEGORIES) if (k.key.equals(e.getKey())) c = k;
+            boolean def = c != null ? c.defaultOn : Rules.KEY_SHARED.equals(e.getKey());
+            e.getValue().setChecked(prefs.getBoolean(e.getKey(), def));
+        }
+        syncing = false;
     }
 
     private void refreshCount() {
@@ -346,9 +450,21 @@ public class MainActivity extends Activity implements SharedPreferences.OnShared
         s.setTextColor(ui.fg);
         s.setChecked(prefs.getBoolean(key, def));
         s.setPadding(0, ui.dp(6), 0, ui.dp(2));
+        final Boolean loose = looseValue(key);
+        if (loose != null) switches.put(key, s);
+        final String label = title;
         s.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
             @Override
             public void onCheckedChanged(CompoundButton b, boolean checked) {
+                if (syncing) return;
+                if (loose != null && checked == loose) {
+                    // Aflojar el bloqueo: deshacer y pasar por la espera de 30 s
+                    syncing = true;
+                    b.setChecked(!checked);
+                    syncing = false;
+                    startActivity(PauseActivity.setting(MainActivity.this, key, checked, label));
+                    return;
+                }
                 prefs.edit().putBoolean(key, checked).apply();
                 if (Rules.KEY_DIAG.equals(key)) refreshDiagnostics();
             }
